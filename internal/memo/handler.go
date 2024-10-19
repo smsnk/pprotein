@@ -6,8 +6,8 @@ import (
 	"net/http"
 
 	"github.com/goccy/go-json"
-	"github.com/kaz/pprotein/internal/collect"
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/collect"
 )
 
 type (

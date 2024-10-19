@@ -6,9 +6,9 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/kaz/pprotein/internal/collect"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/gommon/log"
+	"github.com/smsnk/pprotein/internal/collect"
 )
 
 type (

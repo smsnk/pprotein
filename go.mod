@@ -1,4 +1,4 @@
-module github.com/kaz/pprotein
+module github.com/smsnk/pprotein
 
 go 1.21.4
 

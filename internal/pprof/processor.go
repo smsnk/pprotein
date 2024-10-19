@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"github.com/google/pprof/driver"
-	"github.com/kaz/pprotein/internal/collect"
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/collect"
 )
 
 type (
