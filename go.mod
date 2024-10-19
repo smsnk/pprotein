@@ -1,8 +1,9 @@
 module github.com/smsnk/pprotein
 
-go 1.21.4
+go 1.23.2
 
 require (
+	github.com/7crabs/sysmon-go v0.2.0
 	github.com/alexandrevicenzi/go-sse v1.6.0
 	github.com/felixge/fgprof v0.9.3
 	github.com/gin-gonic/gin v1.9.1

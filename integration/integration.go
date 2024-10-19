@@ -11,6 +11,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/smsnk/pprotein/internal/git"
 	"github.com/smsnk/pprotein/internal/tail"
+	"github.com/smsnk/pprotein/internal/top"
 )
 
 var (
@@ -32,6 +33,8 @@ func RegisterDebugHandlers(r *mux.Router) {
 	r.Handle("/debug/log/slowlog", tail.NewTailHandler(slowlogPath))
 
 	r.Handle("/debug/fgprof", fgprof.Handler())
+
+	r.Handle("/debug/top", top.NewTopHandler())
 
 	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
