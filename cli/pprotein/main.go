@@ -14,6 +14,7 @@ import (
 	"github.com/smsnk/pprotein/internal/memo"
 	"github.com/smsnk/pprotein/internal/pprof"
 	"github.com/smsnk/pprotein/internal/storage"
+	"github.com/smsnk/pprotein/internal/top"
 	"github.com/smsnk/pprotein/view"
 )
 
@@ -54,6 +55,16 @@ func start() error {
 		EventHub: hub,
 	}
 	if err := pprof.NewHandler(pprofOpts).Register(api.Group("/pprof")); err != nil {
+		return err
+	}
+
+	topOpts := &collect.Options{
+		Type:     "top",
+		Ext:      "-toplog.json",
+		Store:    store,
+		EventHub: hub,
+	}
+	if err := top.NewHandler(topOpts).Register(api.Group("/top")); err != nil {
 		return err
 	}
 
