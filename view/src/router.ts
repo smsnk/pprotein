@@ -8,6 +8,7 @@ import PProfEntry from "./components/PProfEntry.vue";
 import SettingList from "./components/SettingList.vue";
 import SlowLogEntry from "./components/SlowLogEntry.vue";
 import MemoEntry from "./components/MemoEntry.vue";
+import TopEntry from "./components/TopEntry.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -53,6 +54,13 @@ export default createRouter({
           component: SlowLogEntry,
           meta: {
             title: "slowlog:{{id}} | group:{{gid}}",
+          },
+        },
+        {
+          path: "top/:id/",
+          component: TopEntry,
+          meta: {
+            title: "top:{{id}} | group:{{gid}}",
           },
         },
         {
@@ -113,6 +121,23 @@ export default createRouter({
       component: SlowLogEntry,
       meta: {
         title: "slowlog:{{id}}",
+      },
+    },
+    {
+      path: "/top/",
+      component: EntryList,
+      meta: {
+        title: "top",
+      },
+      props: {
+        endpoint: "top",
+      },
+    },
+    {
+      path: "/top/:id/",
+      component: TopEntry,
+      meta: {
+        title: "top:{{id}}",
       },
     },
     {
