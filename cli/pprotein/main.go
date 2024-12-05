@@ -10,6 +10,7 @@ import (
 	"github.com/smsnk/pprotein/internal/collect/group"
 	"github.com/smsnk/pprotein/internal/event"
 	"github.com/smsnk/pprotein/internal/extproc/alp"
+	"github.com/smsnk/pprotein/internal/extproc/ptqd"
 	"github.com/smsnk/pprotein/internal/extproc/slp"
 	"github.com/smsnk/pprotein/internal/memo"
 	"github.com/smsnk/pprotein/internal/pprof"
@@ -82,6 +83,20 @@ func start() error {
 		return err
 	}
 	if err := slpHandler.Register(api.Group("/slowlog")); err != nil {
+		return err
+	}
+
+	ptqdOpts := &collect.Options{
+		Type:     "ptqd",
+		Ext:      "-slowlog.log",
+		Store:    store,
+		EventHub: hub,
+	}
+	ptqdHandler, err := ptqd.NewHandler(ptqdOpts, store)
+	if err != nil {
+		return err
+	}
+	if err := ptqdHandler.Register(api.Group("/ptqd")); err != nil {
 		return err
 	}
 

@@ -39,11 +39,11 @@ export interface Config extends Omit<SnapshotTarget, "GroupId"> {
 }
 
 const state = {
-  endpoints: ["memo", "pprof", "httplog", "slowlog"],
+  endpoints: ["memo", "pprof", "httplog", "slowlog", "ptqd"],
   groups: [] as string[],
   entries: {} as { [key: string]: Entry },
 
-  settingKeys: ["group/targets", "httplog/config", "slowlog/config"],
+  settingKeys: ["group/targets", "httplog/config", "slowlog/config", "ptqd/config"],
   settings: {} as { [key: string]: SettingRecord },
 };
 
