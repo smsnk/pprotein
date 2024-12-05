@@ -4,11 +4,11 @@ import (
 	_ "embed"
 	"fmt"
 
-	"github.com/kaz/pprotein/internal/collect"
-	"github.com/kaz/pprotein/internal/extproc"
-	"github.com/kaz/pprotein/internal/persistent"
-	"github.com/kaz/pprotein/internal/storage"
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/collect"
+	"github.com/smsnk/pprotein/internal/extproc"
+	"github.com/smsnk/pprotein/internal/persistent"
+	"github.com/smsnk/pprotein/internal/storage"
 	"gopkg.in/yaml.v3"
 )
 

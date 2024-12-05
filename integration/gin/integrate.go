@@ -2,7 +2,7 @@ package gin
 
 import (
 	"github.com/gin-gonic/gin"
-	"github.com/kaz/pprotein/integration"
+	"github.com/smsnk/pprotein/integration"
 )
 
 func Integrate(r *gin.Engine) {

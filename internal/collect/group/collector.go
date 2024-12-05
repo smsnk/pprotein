@@ -9,10 +9,10 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/goccy/go-json"
-	"github.com/kaz/pprotein/internal/collect"
-	"github.com/kaz/pprotein/internal/persistent"
-	"github.com/kaz/pprotein/internal/storage"
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/collect"
+	"github.com/smsnk/pprotein/internal/persistent"
+	"github.com/smsnk/pprotein/internal/storage"
 	"golang.org/x/sync/errgroup"
 )
 

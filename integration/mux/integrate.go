@@ -2,7 +2,7 @@ package mux
 
 import (
 	"github.com/gorilla/mux"
-	"github.com/kaz/pprotein/integration"
+	"github.com/smsnk/pprotein/integration"
 )
 
 func Integrate(r *mux.Router) {
