@@ -27,6 +27,7 @@ RUN go install github.com/tkuchiki/slp/cmd/slp@latest
 FROM alpine
 
 RUN apk add --no-cache graphviz
+RUN apk add --no-cache --repository=http://dl-cdn.alpinelinux.org/alpine/edge/testing/ percona-toolkit
 
 COPY --from=pprotein /go/src/app/pprotein /usr/local/bin/
 COPY --from=pprotein /go/src/app/pprotein-agent /usr/local/bin/

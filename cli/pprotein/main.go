@@ -4,17 +4,18 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/kaz/pprotein/integration/echov4"
-	"github.com/kaz/pprotein/internal/collect"
-	"github.com/kaz/pprotein/internal/collect/group"
-	"github.com/kaz/pprotein/internal/event"
-	"github.com/kaz/pprotein/internal/extproc/alp"
-	"github.com/kaz/pprotein/internal/extproc/slp"
-	"github.com/kaz/pprotein/internal/memo"
-	"github.com/kaz/pprotein/internal/pprof"
-	"github.com/kaz/pprotein/internal/storage"
-	"github.com/kaz/pprotein/view"
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/integration/echov4"
+	"github.com/smsnk/pprotein/internal/collect"
+	"github.com/smsnk/pprotein/internal/collect/group"
+	"github.com/smsnk/pprotein/internal/event"
+	"github.com/smsnk/pprotein/internal/extproc/alp"
+	"github.com/smsnk/pprotein/internal/extproc/ptqd"
+	"github.com/smsnk/pprotein/internal/extproc/slp"
+	"github.com/smsnk/pprotein/internal/memo"
+	"github.com/smsnk/pprotein/internal/pprof"
+	"github.com/smsnk/pprotein/internal/storage"
+	"github.com/smsnk/pprotein/view"
 )
 
 func start() error {
@@ -82,6 +83,20 @@ func start() error {
 		return err
 	}
 	if err := slpHandler.Register(api.Group("/slowlog")); err != nil {
+		return err
+	}
+
+	ptqdOpts := &collect.Options{
+		Type:     "ptqd",
+		Ext:      "-slowlog.log",
+		Store:    store,
+		EventHub: hub,
+	}
+	ptqdHandler, err := ptqd.NewHandler(ptqdOpts, store)
+	if err != nil {
+		return err
+	}
+	if err := ptqdHandler.Register(api.Group("/ptqd")); err != nil {
 		return err
 	}
 

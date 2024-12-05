@@ -8,6 +8,7 @@ import PProfEntry from "./components/PProfEntry.vue";
 import SettingList from "./components/SettingList.vue";
 import SlowLogEntry from "./components/SlowLogEntry.vue";
 import MemoEntry from "./components/MemoEntry.vue";
+import PtqdEntry from "./components/PtqdEntry.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -60,6 +61,13 @@ export default createRouter({
           component: MemoEntry,
           meta: {
             title: "memo:{{id}} | group:{{gid}}",
+          },
+        },
+        {
+          path: "ptqd/:id/",
+          component: PtqdEntry,
+          meta: {
+            title: "ptqd:{{id}} | group:{{gid}}",
           },
         },
       ],
@@ -120,6 +128,23 @@ export default createRouter({
       component: SettingList,
       meta: {
         title: "setting",
+      },
+    },
+    {
+      path: "/ptqd/",
+      component: EntryList,
+      meta: {
+        title: "ptqd",
+      },
+      props: {
+        endpoint: "ptqd",
+      },
+    },
+    {
+      path: "/ptqd/:id/",
+      component: PtqdEntry,
+      meta: {
+        title: "ptqd:{{id}}",
       },
     },
   ],

@@ -1,4 +1,4 @@
-package alp
+package ptqd
 
 import (
 	"bytes"
@@ -25,7 +25,7 @@ func (p *processor) Process(snapshot *collect.Snapshot) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("failed to find snapshot body: %w", err)
 	}
 
-	cmd := exec.Command("alp", "ltsv", "--config", p.confPath, "--format", "tsv", "--file", bodyPath)
+	cmd := exec.Command("pt-query-digest", "--config", p.confPath, bodyPath)
 
 	res, err := cmd.Output()
 	if err != nil {
