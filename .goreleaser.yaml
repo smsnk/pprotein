@@ -17,6 +17,19 @@ builds:
     goarch:
       - amd64
       - arm64
+  - id: pprotein-cli
+    binary: pprotein-cli
+    main: ./cli/pprotein-cli
+    flags:
+      - -trimpath
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
   - id: pprotein-agent
     binary: pprotein-agent
     main: ./cli/pprotein-agent

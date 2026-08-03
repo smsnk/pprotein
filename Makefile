@@ -10,7 +10,7 @@ run-agent:
 	go run ./cli/pprotein-agent
 
 .PHONY: build
-build: pprotein pprotein-agent
+build: pprotein pprotein-agent pprotein-cli
 
 pprotein: view/dist
 	go build -trimpath -ldflags="-w -s" ./cli/pprotein
@@ -18,10 +18,13 @@ pprotein: view/dist
 pprotein-agent:
 	go build -trimpath -ldflags="-w -s" ./cli/pprotein-agent
 
+pprotein-cli:
+	go build -trimpath -ldflags="-w -s" ./cli/pprotein-cli
+
 view/dist:
 	npm --prefix view ci
 	npm --prefix view run build
 
 .PHONY: clean
 clean:
-	rm -rf pprotein pprotein-agent view/dist
+	rm -rf pprotein pprotein-agent pprotein-cli view/dist
