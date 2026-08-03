@@ -22,5 +22,11 @@
 		"Label": "localhost",
 		"Type": "ptqd",
 		"URL": "http://localhost:9000/debug/log/slowlog"
+	},
+	{
+		"Duration": 10,
+		"Label": "localhost",
+		"Type": "resource",
+		"URL": "http://localhost:9000/debug/resource"
 	}
 ]

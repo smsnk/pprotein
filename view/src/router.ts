@@ -10,6 +10,7 @@ import SlowLogEntry from "./components/SlowLogEntry.vue";
 import MemoEntry from "./components/MemoEntry.vue";
 import PtqdEntry from "./components/PtqdEntry.vue";
 import ScoreEntry from "./components/ScoreEntry.vue";
+import ResourceEntry from "./components/ResourceEntry.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -69,6 +70,13 @@ export default createRouter({
           component: PtqdEntry,
           meta: {
             title: "ptqd:{{id}} | group:{{gid}}",
+          },
+        },
+        {
+          path: "resource/:id/",
+          component: ResourceEntry,
+          meta: {
+            title: "resource:{{id}} | group:{{gid}}",
           },
         },
         {
@@ -147,6 +155,23 @@ export default createRouter({
       component: ScoreEntry,
       meta: {
         title: "score:{{id}}",
+      },
+    },
+    {
+      path: "/resource/",
+      component: EntryList,
+      meta: {
+        title: "resource",
+      },
+      props: {
+        endpoint: "resource",
+      },
+    },
+    {
+      path: "/resource/:id/",
+      component: ResourceEntry,
+      meta: {
+        title: "resource:{{id}}",
       },
     },
     {
