@@ -21,7 +21,15 @@
       :key="group"
       :open="i === 0 || openAll"
     >
-      <summary>Group: {{ group }}</summary>
+      <summary>
+        Group: {{ group }}
+        <span
+          v-if="$store.getters.scoreByGroup(group)"
+          :class="['score', scoreClass(group)]"
+        >
+          {{ $store.getters.scoreByGroup(group).Message }}
+        </span>
+      </summary>
       <GroupEntriesTable
         :group-id="group"
         :entries="$store.getters.entriesByGroup(group)"
@@ -53,6 +61,10 @@ export default defineComponent({
     },
   },
   methods: {
+    scoreClass(group: string) {
+      const message = this.$store.getters.scoreByGroup(group)?.Message || "";
+      return message.includes("FAIL") ? "fail" : "pass";
+    },
     async collect() {
       const resp = await fetch(this.url);
       if (!resp.ok) {
@@ -72,6 +84,20 @@ section {
 
 details {
   margin-bottom: 1em;
+}
+
+.score {
+  margin-left: 1em;
+  padding: 0.1em 0.6em;
+  border-radius: 0.2em;
+  color: #fff;
+
+  &.pass {
+    background-color: #2c6fbb;
+  }
+  &.fail {
+    background-color: #c0392b;
+  }
 }
 
 .form {
