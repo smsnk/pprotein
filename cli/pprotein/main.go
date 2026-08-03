@@ -9,11 +9,13 @@ import (
 	"github.com/smsnk/pprotein/internal/collect"
 	"github.com/smsnk/pprotein/internal/collect/group"
 	"github.com/smsnk/pprotein/internal/event"
+	"github.com/smsnk/pprotein/internal/extproc"
 	"github.com/smsnk/pprotein/internal/extproc/alp"
 	"github.com/smsnk/pprotein/internal/extproc/ptqd"
 	"github.com/smsnk/pprotein/internal/extproc/slp"
 	"github.com/smsnk/pprotein/internal/memo"
 	"github.com/smsnk/pprotein/internal/pprof"
+	"github.com/smsnk/pprotein/internal/resource"
 	"github.com/smsnk/pprotein/internal/score"
 	"github.com/smsnk/pprotein/internal/storage"
 	"github.com/smsnk/pprotein/view"
@@ -108,6 +110,16 @@ func start() error {
 		EventHub: hub,
 	}
 	if err := memo.NewHandler(memoOpts).Register(api.Group("/memo")); err != nil {
+		return err
+	}
+
+	resourceOpts := &collect.Options{
+		Type:     "resource",
+		Ext:      "-resource.json",
+		Store:    store,
+		EventHub: hub,
+	}
+	if err := extproc.NewHandler(&resource.Processor{}, resourceOpts).Register(api.Group("/resource")); err != nil {
 		return err
 	}
 
