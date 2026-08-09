@@ -284,7 +284,7 @@ func TestCompare(t *testing.T) {
 	if e, ok := byKey["GET /api/chair/rides/abc123"]; !ok || e.SumAfter != 0 {
 		t.Errorf("消えたエンドポイントが残っていない: %+v", byKey)
 	}
-	// 増減の大きい順
+	// IMPACT の大きい順
 	if d.Endpoints[0].Key != "GET /api/chair/rides/abc123" {
 		t.Errorf("並び順 = %+v", d.Endpoints)
 	}
@@ -294,10 +294,52 @@ func TestCompare(t *testing.T) {
 		"# diff 2025-11-23_10-21-33.123456 -> 2025-11-23_10-41-02.984213",
 		"score: 12345 -> 18902 (+6557, +53.1%)",
 		"## httplog",
+		"IMPACT",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("Markdown に %q が無い:\n%s", want, md)
 		}
+	}
+}
+
+// 固定時間のベンチでは SUM がほとんど動かず、代わりに件数が増える。
+// SUM の増減で並べると、いちばん効いたエンドポイントが下に埋もれてしまう。
+func TestCompareRanksByImpactNotSumDelta(t *testing.T) {
+	// hot: 1件あたり 0.033s -> 0.010s、件数が 14394 -> 44529 に増えた（大きく効いた）
+	// cold: 1件あたりは同じくらい改善したが、そもそも件数が少ない
+	beforeAlp := "Count\tMethod\tUri\tSum\tAvg\n" +
+		"14394\tGET\t/hot\t468.961\t0.033\n" +
+		"159\tGET\t/cold\t5.287\t0.033\n"
+	afterAlp := "Count\tMethod\tUri\tSum\tAvg\n" +
+		"44529\tGET\t/hot\t465.864\t0.010\n" +
+		"193\tGET\t/cold\t1.986\t0.010\n"
+
+	s := mockServer(t, map[string]map[string]string{
+		"2025-11-23_10-21-33.123456": {"httplog": beforeAlp},
+		"2025-11-23_10-41-02.984213": {"httplog": afterAlp},
+	}, map[string]string{})
+	c := NewClient(s.URL)
+
+	before, err := Load(c, "2025-11-23_10-21-33.123456", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := Load(c, "2025-11-23_10-41-02.984213", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	d := Compare(before, after, 10)
+
+	// SUM の増減だけ見ると cold(-3.301) > hot(-3.097) で順位が逆転する
+	if !(abs(d.Endpoints[0].SumDelta()) < abs(d.Endpoints[1].SumDelta())) {
+		t.Fatalf("この前提が崩れるとテストの意味がない: %+v", d.Endpoints)
+	}
+	if d.Endpoints[0].Key != "GET /hot" {
+		t.Errorf("件数の多いエンドポイントが先頭に来るはず: %+v", d.Endpoints)
+	}
+	if d.Endpoints[0].Impact() >= -100 {
+		t.Errorf("hot の IMPACT = %v, もっと大きな削減のはず", d.Endpoints[0].Impact())
 	}
 }
 
