@@ -60,26 +60,30 @@
         @hover="hovered = $event"
       />
 
-      <h3>直近2回の差分（SUM の増減が大きい順）</h3>
+      <h3>直近2回の差分（IMPACT の大きい順）</h3>
+      <p class="note">
+        IMPACT = 1件あたりの増減 × 件数。固定時間のベンチでは速くしても
+        SUM がほとんど動かない（代わりに件数が増える）ため、SUM では並べない。
+      </p>
       <table v-if="diffRows.length">
         <thead>
           <tr>
             <th>ENDPOINT</th>
-            <th>SUM before</th>
-            <th>SUM after</th>
-            <th>DELTA</th>
-            <th>COUNT delta</th>
+            <th>COUNT</th>
+            <th>AVG</th>
+            <th>SUM</th>
+            <th>IMPACT</th>
           </tr>
         </thead>
         <tbody>
           <tr v-for="r in diffRows" :key="r.key">
             <td>{{ r.key }}</td>
-            <td class="n">{{ fmt(r.before) }}</td>
-            <td class="n">{{ fmt(r.after) }}</td>
-            <td :class="['n', r.delta > 0 ? 'worse' : 'better']">
-              {{ signed(r.delta) }}
+            <td class="n">{{ fmt(r.countBefore) }} → {{ fmt(r.countAfter) }}</td>
+            <td class="n">{{ fmt(r.avgBefore) }} → {{ fmt(r.avgAfter) }}</td>
+            <td class="n">{{ fmt(r.sumBefore) }} → {{ fmt(r.sumAfter) }}</td>
+            <td :class="['n', r.impact > 0 ? 'worse' : 'better']">
+              {{ signed(r.impact) }}
             </td>
-            <td class="n">{{ signed(r.countDelta) }}</td>
           </tr>
         </tbody>
       </table>
@@ -193,16 +197,24 @@ export default defineComponent({
       const rows = [...new Set([...bmap.keys(), ...amap.keys()])].map((k) => {
         const b = bmap.get(k);
         const a = amap.get(k);
+        const countBefore = b?.Count ?? 0;
+        const countAfter = a?.Count ?? 0;
+        const avgBefore = b?.Avg ?? 0;
+        const avgAfter = a?.Avg ?? 0;
+        const n = (countBefore + countAfter) / 2;
         return {
           key: k,
-          before: b?.Sum ?? 0,
-          after: a?.Sum ?? 0,
-          delta: (a?.Sum ?? 0) - (b?.Sum ?? 0),
-          countDelta: (a?.Count ?? 0) - (b?.Count ?? 0),
+          countBefore,
+          countAfter,
+          avgBefore,
+          avgAfter,
+          sumBefore: b?.Sum ?? 0,
+          sumAfter: a?.Sum ?? 0,
+          impact: n === 0 ? 0 : (avgAfter - avgBefore) * n,
         };
       });
       return rows
-        .sort((x, y) => Math.abs(y.delta) - Math.abs(x.delta))
+        .sort((x, y) => Math.abs(y.impact) - Math.abs(x.impact))
         .slice(0, 20);
     },
   },
@@ -279,6 +291,12 @@ section {
 
 h3 {
   margin-top: 2em;
+}
+
+.note {
+  margin: 0.3em 0 0 0;
+  color: #666;
+  font-size: 0.9em;
 }
 
 table {
