@@ -87,22 +87,53 @@ type ScoreDiff struct {
 }
 
 type EndpointDiff struct {
-	Label      string
-	Key        string
-	CountDelta float64
-	SumBefore  float64
-	SumAfter   float64
+	Label       string
+	Key         string
+	CountBefore float64
+	CountAfter  float64
+	SumBefore   float64
+	SumAfter    float64
+	AvgBefore   float64
+	AvgAfter    float64
 }
 
 type QueryDiff struct {
-	Label     string
-	Query     string
-	SumBefore float64
-	SumAfter  float64
+	Label       string
+	Query       string
+	CountBefore float64
+	CountAfter  float64
+	SumBefore   float64
+	SumAfter    float64
+	AvgBefore   float64
+	AvgAfter    float64
 }
 
-func (d EndpointDiff) SumDelta() float64 { return d.SumAfter - d.SumBefore }
-func (d QueryDiff) SumDelta() float64    { return d.SumAfter - d.SumBefore }
+func (d EndpointDiff) SumDelta() float64   { return d.SumAfter - d.SumBefore }
+func (d EndpointDiff) CountDelta() float64 { return d.CountAfter - d.CountBefore }
+func (d EndpointDiff) AvgDelta() float64   { return d.AvgAfter - d.AvgBefore }
+func (d QueryDiff) SumDelta() float64      { return d.SumAfter - d.SumBefore }
+func (d QueryDiff) CountDelta() float64    { return d.CountAfter - d.CountBefore }
+func (d QueryDiff) AvgDelta() float64      { return d.AvgAfter - d.AvgBefore }
+
+// Impact は「リクエスト数を揃えたとき、合計でどれだけ時間が増減したか」。
+//
+// ベンチが固定時間だと、速くしても空いた時間に次のリクエストが入るので
+// SUM はほとんど動かない（代わりに件数が増える）。SUM の増減で並べると
+// いちばん効いた施策が下に埋もれるので、1件あたりの増減に件数を掛けて順位を付ける。
+func (d EndpointDiff) Impact() float64 {
+	return impact(d.AvgDelta(), d.CountBefore, d.CountAfter)
+}
+func (d QueryDiff) Impact() float64 {
+	return impact(d.AvgDelta(), d.CountBefore, d.CountAfter)
+}
+
+func impact(avgDelta, countBefore, countAfter float64) float64 {
+	n := (countBefore + countAfter) / 2
+	if n == 0 {
+		return 0
+	}
+	return avgDelta * n
+}
 
 // Compare は before -> after のエンドポイント / クエリ単位の増減を出す。
 // 片方にしか無いものも「新規 / 消滅」として残す。
@@ -129,19 +160,21 @@ func Compare(before, after *Group, topN int) *Diff {
 			seen[e.Key()] = true
 			d.Endpoints = append(d.Endpoints, EndpointDiff{
 				Label: a.Label, Key: e.Key(),
-				CountDelta: e.Count - prev.Count,
-				SumBefore:  prev.Sum, SumAfter: e.Sum,
+				CountBefore: prev.Count, CountAfter: e.Count,
+				SumBefore: prev.Sum, SumAfter: e.Sum,
+				AvgBefore: prev.Avg, AvgAfter: e.Avg,
 			})
 		}
 		for key, e := range bmap {
 			if !seen[key] {
 				d.Endpoints = append(d.Endpoints, EndpointDiff{
-					Label: a.Label, Key: key, CountDelta: -e.Count, SumBefore: e.Sum,
+					Label: a.Label, Key: key,
+					CountBefore: e.Count, SumBefore: e.Sum, AvgBefore: e.Avg,
 				})
 			}
 		}
 	}
-	sortByAbsDelta(d.Endpoints, func(e EndpointDiff) float64 { return e.SumDelta() })
+	sortByAbsDelta(d.Endpoints, func(e EndpointDiff) float64 { return e.Impact() })
 	d.Endpoints = head(d.Endpoints, topN)
 
 	for _, a := range after.SlowLog {
@@ -159,16 +192,22 @@ func Compare(before, after *Group, topN int) *Diff {
 			prev := bmap[q.Key()]
 			seen[q.Key()] = true
 			d.Queries = append(d.Queries, QueryDiff{
-				Label: a.Label, Query: q.Query, SumBefore: prev.Sum, SumAfter: q.Sum,
+				Label: a.Label, Query: q.Query,
+				CountBefore: prev.Count, CountAfter: q.Count,
+				SumBefore: prev.Sum, SumAfter: q.Sum,
+				AvgBefore: prev.Avg, AvgAfter: q.Avg,
 			})
 		}
 		for key, q := range bmap {
 			if !seen[key] {
-				d.Queries = append(d.Queries, QueryDiff{Label: a.Label, Query: key, SumBefore: q.Sum})
+				d.Queries = append(d.Queries, QueryDiff{
+					Label: a.Label, Query: key,
+					CountBefore: q.Count, SumBefore: q.Sum, AvgBefore: q.Avg,
+				})
 			}
 		}
 	}
-	sortByAbsDelta(d.Queries, func(q QueryDiff) float64 { return q.SumDelta() })
+	sortByAbsDelta(d.Queries, func(q QueryDiff) float64 { return q.Impact() })
 	d.Queries = head(d.Queries, topN)
 
 	return d
@@ -194,23 +233,31 @@ func (d *Diff) Markdown() string {
 	b.WriteString("\n")
 
 	if len(d.Endpoints) > 0 {
-		b.WriteString("## httplog（SUM の増減が大きい順）\n\n")
-		b.WriteString("| LABEL | ENDPOINT | SUM before | SUM after | DELTA | COUNT delta |\n")
+		b.WriteString("## httplog（IMPACT の大きい順）\n\n")
+		b.WriteString("| LABEL | ENDPOINT | COUNT | AVG | SUM | IMPACT |\n")
 		b.WriteString("| --- | --- | ---: | ---: | ---: | ---: |\n")
 		for _, e := range d.Endpoints {
 			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
-				e.Label, e.Key, num(e.SumBefore), num(e.SumAfter), signed(e.SumDelta()), signed(e.CountDelta))
+				e.Label, e.Key,
+				arrow(e.CountBefore, e.CountAfter),
+				arrow(e.AvgBefore, e.AvgAfter),
+				arrow(e.SumBefore, e.SumAfter),
+				signed(e.Impact()))
 		}
 		b.WriteString("\n")
 	}
 
 	if len(d.Queries) > 0 {
-		b.WriteString("## slowlog（合計クエリ時間の増減が大きい順）\n\n")
-		b.WriteString("| LABEL | SUM before | SUM after | DELTA | QUERY |\n")
-		b.WriteString("| --- | ---: | ---: | ---: | --- |\n")
+		b.WriteString("## slowlog（IMPACT の大きい順）\n\n")
+		b.WriteString("| LABEL | COUNT | AVG | SUM | IMPACT | QUERY |\n")
+		b.WriteString("| --- | ---: | ---: | ---: | ---: | --- |\n")
 		for _, q := range d.Queries {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
-				q.Label, num(q.SumBefore), num(q.SumAfter), signed(q.SumDelta()), oneLine(q.Query))
+			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
+				q.Label,
+				arrow(q.CountBefore, q.CountAfter),
+				arrow(q.AvgBefore, q.AvgAfter),
+				arrow(q.SumBefore, q.SumAfter),
+				signed(q.Impact()), oneLine(q.Query))
 		}
 		b.WriteString("\n")
 	}
@@ -242,6 +289,11 @@ func num(v float64) string {
 	default:
 		return fmt.Sprintf("%.3f", v)
 	}
+}
+
+// arrow は before → after を1セルにまとめる。
+func arrow(before, after float64) string {
+	return num(before) + " → " + num(after)
 }
 
 func signed(v float64) string {
