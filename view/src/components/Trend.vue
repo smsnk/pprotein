@@ -78,7 +78,7 @@
         <tbody>
           <tr v-for="r in diffRows" :key="r.key">
             <td>{{ r.key }}</td>
-            <td class="n">{{ fmt(r.countBefore) }} → {{ fmt(r.countAfter) }}</td>
+            <td class="n">{{ int(r.countBefore) }} → {{ int(r.countAfter) }}</td>
             <td class="n">{{ fmt(r.avgBefore) }} → {{ fmt(r.avgAfter) }}</td>
             <td class="n">{{ fmt(r.sumBefore) }} → {{ fmt(r.sumAfter) }}</td>
             <td :class="['n', r.impact > 0 ? 'worse' : 'better']">
@@ -244,6 +244,9 @@ export default defineComponent({
     },
     fmt(v: number) {
       return v >= 1000 ? v.toFixed(0) : v.toFixed(3);
+    },
+    int(v: number) {
+      return v.toFixed(0);
     },
     signed(v: number) {
       const s = Math.abs(v) >= 1000 ? Math.abs(v).toFixed(0) : Math.abs(v).toFixed(3);
