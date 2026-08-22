@@ -39,7 +39,7 @@ export interface Config extends Omit<SnapshotTarget, "GroupId"> {
 }
 
 const state = {
-  endpoints: ["score", "memo", "pprof", "httplog", "slowlog", "ptqd"],
+  endpoints: ["score", "memo", "pprof", "httplog", "slowlog", "ptqd", "resource"],
   groups: [] as string[],
   entries: {} as { [key: string]: Entry },
 

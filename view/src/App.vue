@@ -22,6 +22,9 @@
       <router-link v-slot="{ navigate, isActive }" to="/ptqd/" custom>
         <div :class="{ active: isActive }" @click="navigate">ptqd</div>
       </router-link>
+      <router-link v-slot="{ navigate, isActive }" to="/resource/" custom>
+        <div :class="{ active: isActive }" @click="navigate">resource</div>
+      </router-link>
       <router-link v-slot="{ navigate, isActive }" to="/setting/" custom>
         <div :class="{ active: isActive }" @click="navigate">setting</div>
       </router-link>

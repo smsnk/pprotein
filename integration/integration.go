@@ -10,6 +10,7 @@ import (
 	"github.com/goccy/go-json"
 	"github.com/gorilla/mux"
 	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/resource"
 	"github.com/smsnk/pprotein/internal/tail"
 )
 
@@ -32,6 +33,9 @@ func RegisterDebugHandlers(r *mux.Router) {
 	r.Handle("/debug/log/slowlog", tail.NewTailHandler(slowlogPath))
 
 	r.Handle("/debug/fgprof", fgprof.Handler())
+
+	// 走行中のホスト/プロセスのリソース使用状況（Linux のみ。/proc を読む）
+	r.Handle("/debug/resource", resource.NewHandler())
 
 	r.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	r.HandleFunc("/debug/pprof/profile", pprof.Profile)
