@@ -39,7 +39,7 @@ export interface Config extends Omit<SnapshotTarget, "GroupId"> {
 }
 
 const state = {
-  endpoints: ["memo", "pprof", "httplog", "slowlog", "ptqd"],
+  endpoints: ["score", "memo", "pprof", "httplog", "slowlog", "ptqd"],
   groups: [] as string[],
   entries: {} as { [key: string]: Entry },
 
@@ -150,6 +150,12 @@ export default createStore({
             ? a.Snapshot.Label.localeCompare(b.Snapshot.Label)
             : ai - bi;
         });
+    },
+    // 収集ごとのスコア。一覧の見出しに出す。
+    scoreByGroup: (state) => (groupId: string) => {
+      return Object.values(state.entries).find(
+        (e) => e.Snapshot.GroupId == groupId && e.Snapshot.Type == "score",
+      );
     },
     availableEntriesByGroup: (_, getters) => (groupId: string) => {
       return getters

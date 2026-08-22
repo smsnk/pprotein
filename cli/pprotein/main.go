@@ -14,6 +14,7 @@ import (
 	"github.com/smsnk/pprotein/internal/extproc/slp"
 	"github.com/smsnk/pprotein/internal/memo"
 	"github.com/smsnk/pprotein/internal/pprof"
+	"github.com/smsnk/pprotein/internal/score"
 	"github.com/smsnk/pprotein/internal/storage"
 	"github.com/smsnk/pprotein/view"
 )
@@ -107,6 +108,16 @@ func start() error {
 		EventHub: hub,
 	}
 	if err := memo.NewHandler(memoOpts).Register(api.Group("/memo")); err != nil {
+		return err
+	}
+
+	scoreOpts := &collect.Options{
+		Type:     "score",
+		Ext:      "-score.json",
+		Store:    store,
+		EventHub: hub,
+	}
+	if err := score.NewHandler(scoreOpts).Register(api.Group("/score")); err != nil {
 		return err
 	}
 
