@@ -226,7 +226,9 @@ export default defineComponent({
       this.loading = true;
       this.error = "";
       try {
-        const resp = await fetch(`/api/trend?limit=${this.limit}`);
+        // top は上限まで取る。既定の8件だと「直近2回の差分」で
+        // 上位から外れたエンドポイントが count 0 に見えてしまう
+        const resp = await fetch(`/api/trend?limit=${this.limit}&top=50`);
         if (!resp.ok) {
           this.error = `http error: status=${resp.status}`;
           return;

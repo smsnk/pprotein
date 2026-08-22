@@ -107,16 +107,19 @@ func (h *Handler) getTrend(c echo.Context) error {
 
 	resp := &Response{Groups: make([]Point, 0, len(ids))}
 	for _, id := range ids {
-		g, err := summary.Load(h.client, id, topN)
+		// topN で切り詰める前の全件を読む。Metrics（総数・合計）を
+		// 上位 topN 件だけから集計すると、件数の多い軽量エンドポイントが
+		// 抜け落ちて「リクエスト総数」が実際より小さく出る。
+		g, err := summary.Load(h.client, id, 0)
 		if err != nil {
 			continue // 収集中 / 壊れている group は飛ばす
 		}
-		resp.Groups = append(resp.Groups, buildPoint(g))
+		resp.Groups = append(resp.Groups, buildPoint(g, topN))
 	}
 	return c.JSON(http.StatusOK, resp)
 }
 
-func buildPoint(g *summary.Group) Point {
+func buildPoint(g *summary.Group, topN int) Point {
 	p := Point{
 		ID:      g.ID,
 		Metrics: map[string]float64{},
@@ -137,12 +140,14 @@ func buildPoint(g *summary.Group) Point {
 	}
 
 	// httplog: 合計レスポンスタイムとリクエスト総数。
-	// top N に絞った明細ではなく、収集全体の合計を出したいので Endpoints は別に持つ。
+	// Metrics は収集全体の合計、明細（Endpoints / Queries）は上位 topN 件に絞る。
 	var httpSum, httpCount float64
 	for _, s := range g.HTTPLog {
 		for _, e := range s.Endpoints {
 			httpSum += e.Sum
 			httpCount += e.Count
+		}
+		for _, e := range head(s.Endpoints, topN) {
 			p.Endpoints = append(p.Endpoints, Series{
 				Label: s.Label, Key: e.Method + " " + e.Uri,
 				Count: e.Count, Sum: e.Sum, Avg: e.Avg,
@@ -160,6 +165,8 @@ func buildPoint(g *summary.Group) Point {
 			slowSum += q.Sum
 			slowCount += q.Count
 			slowRows += q.RowsExamined * q.Count
+		}
+		for _, q := range head(s.Queries, topN) {
 			p.Queries = append(p.Queries, Series{
 				Label: s.Label, Key: q.Query,
 				Count: q.Count, Sum: q.Sum, Avg: q.Avg,
@@ -173,6 +180,14 @@ func buildPoint(g *summary.Group) Point {
 	}
 
 	return p
+}
+
+// head は明細を上位 n 件に絞る（各リストは Sum 降順に並んでいる）。
+func head[T any](s []T, n int) []T {
+	if n > 0 && len(s) > n {
+		return s[:n]
+	}
+	return s
 }
 
 func intParam(c echo.Context, key string, def, max int) int {
