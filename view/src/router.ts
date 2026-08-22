@@ -11,6 +11,7 @@ import MemoEntry from "./components/MemoEntry.vue";
 import PtqdEntry from "./components/PtqdEntry.vue";
 import ScoreEntry from "./components/ScoreEntry.vue";
 import ResourceEntry from "./components/ResourceEntry.vue";
+import Trend from "./components/Trend.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -18,6 +19,13 @@ export default createRouter({
     {
       path: "/",
       redirect: "/group/",
+    },
+    {
+      path: "/trend/",
+      component: Trend,
+      meta: {
+        title: "trend",
+      },
     },
     {
       path: "/group/",

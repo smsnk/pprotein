@@ -18,6 +18,7 @@ import (
 	"github.com/smsnk/pprotein/internal/resource"
 	"github.com/smsnk/pprotein/internal/score"
 	"github.com/smsnk/pprotein/internal/storage"
+	"github.com/smsnk/pprotein/internal/trend"
 	"github.com/smsnk/pprotein/view"
 )
 
@@ -138,6 +139,9 @@ func start() error {
 		return err
 	}
 	grp.RegisterHandlers(api.Group("/group"))
+
+	// 収集をまたいだ推移。集計は自分自身の API 経由で行う（processor のキャッシュが効く）
+	trend.NewHandler("http://localhost:" + port).RegisterHandlers(api.Group("/trend"))
 
 	return e.Start(":" + port)
 }
