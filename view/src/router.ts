@@ -139,6 +139,7 @@ export default createRouter({
       },
       props: {
         endpoint: "score",
+        collectable: false,
       },
     },
     {
