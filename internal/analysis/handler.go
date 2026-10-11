@@ -23,6 +23,7 @@ var defaultConfig []byte
 type Handler struct {
 	client *summary.Client
 	config *persistent.Handler
+	cache  *reportCache
 }
 
 func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
@@ -30,7 +31,7 @@ func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
-	return &Handler{client: summary.NewClient(selfURL), config: config}, nil
+	return &Handler{client: summary.NewClient(selfURL), config: config, cache: newReportCache()}, nil
 }
 
 func sanitize(raw []byte) ([]byte, error) {
@@ -43,16 +44,25 @@ func sanitize(raw []byte) ([]byte, error) {
 
 func (h *Handler) RegisterHandlers(g *echo.Group) {
 	h.config.RegisterHandlers(g.Group("/config"))
+	g.GET("", h.getRuns)
 	g.GET("/:id", h.get)
+}
+
+func (h *Handler) loadConfig() (*Config, []byte, error) {
+	raw, err := h.config.GetContent()
+	if err != nil {
+		return nil, nil, err
+	}
+	cfg, err := ParseConfig(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cfg, raw, nil
 }
 
 // get は GET /api/analysis/:id。id に latest を渡すと httplog がある最新の収集を使う。
 func (h *Handler) get(c echo.Context) error {
-	raw, err := h.config.GetContent()
-	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
-	}
-	cfg, err := ParseConfig(raw)
+	cfg, raw, err := h.loadConfig()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
@@ -65,12 +75,15 @@ func (h *Handler) get(c echo.Context) error {
 		}
 	}
 
-	in, err := Load(h.client, cfg, id)
+	idx, err := loadEntryIndex(h.client)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	rep, err := h.report(cfg, raw, idx, id)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
-	in.ConfigHash.Analysis = dbquery.HashConfig(raw)
-	return c.JSON(http.StatusOK, Analyze(cfg, in))
+	return compactJSON(c, rep)
 }
 
 // LatestGroup は httplog がある最新の収集グループを返す。

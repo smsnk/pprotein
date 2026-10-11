@@ -44,9 +44,17 @@ func NewClient(baseURL string) *Client {
 }
 
 func (c *Client) get(path string) ([]byte, error) {
+	return c.GetQuery(path, nil)
+}
+
+// GetQuery は path にクエリ文字列を付けて GET する（path に ? を含めると JoinPath でエスケープされるため）。
+func (c *Client) GetQuery(path string, query url.Values) ([]byte, error) {
 	u, err := url.JoinPath(c.BaseURL, path)
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
+	}
+	if len(query) > 0 {
+		u += "?" + query.Encode()
 	}
 
 	resp, err := c.HTTP.Get(u)

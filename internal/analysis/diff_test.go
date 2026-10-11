@@ -227,7 +227,7 @@ lifecycles:
 	}
 	out := string(buf)
 	for _, want := range []string{
-		`"BucketSec":5`, `"S499":1`, `"P50Sec":0.033`, `"OffsetSec":0`, `"T50Sec":5`,
+		`"BucketSec":5`, `"S499":1`, `"P50Sec":0.033`, `"OffsetSec":[0]`, `"T50Sec":5`,
 		`"RateFromPrev":1`, `"FromPrevSec":{"P50":0.033`, `"Role":"score"`, `"Query":"tips"`,
 		`"Query":"lifecycle:viewer"`,
 	} {

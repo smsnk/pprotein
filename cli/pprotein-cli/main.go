@@ -10,6 +10,7 @@
 //	pprotein-cli collect             収集を開始して完了まで待ち、そのまま要約する
 //	pprotein-cli analyze [groupId]   走行を時系列・ライフサイクル・内訳で集計する
 //	pprotein-cli analyze-diff <A> <B>  2つの走行の analyze を比較する
+//	pprotein-cli analyze-trend       直近の走行の得点・母数・利用者の進み方を並べる
 //
 // 接続先は --url（既定 http://localhost:9000、環境変数 PPROTEIN_URL でも指定できる）。
 package main
@@ -17,7 +18,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	neturl "net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -35,10 +38,12 @@ usage:
   pprotein-cli collect [flags]
   pprotein-cli analyze [groupId] [flags]   省略時は httplog がある最新の収集
   pprotein-cli analyze-diff <before> <after> [flags]
+  pprotein-cli analyze-trend [--limit N] [flags]
 
 flags:
   --url string     pprotein の URL (既定 $PPROTEIN_URL または http://localhost:9000)
   --top int        各表に出す件数 (既定 10)
+  --limit int      analyze-trend: 遡る走行の数 (既定 20、最大 100)
   --json           JSON で出力する
   --wait           collect: 収集の完了を待つ (既定 true)
                    analyze: 指定したときだけ、その収集の httplog / dbquery が確定するまで待つ
@@ -68,6 +73,7 @@ func run() error {
 	fs.Usage = func() { fmt.Print(usage) }
 	url := fs.String("url", envOr("PPROTEIN_URL", "http://localhost:9000"), "pprotein の URL")
 	topN := fs.Int("top", 10, "各表に出す件数")
+	limit := fs.Int("limit", 20, "analyze-trend: 遡る走行の数")
 	asJSON := fs.Bool("json", false, "JSON で出力する")
 	wait := fs.Bool("wait", true, "collect: 収集の完了を待つ")
 	timeout := fs.Duration("timeout", 5*time.Minute, "collect: 完了待ちの上限")
@@ -144,6 +150,22 @@ func run() error {
 		}
 		return printAnalysis(c, id, *asJSON)
 
+	case "analyze-trend":
+		body, err := c.GetQuery("/api/analysis", neturl.Values{"limit": {strconv.Itoa(*limit)}})
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			fmt.Println(string(body))
+			return nil
+		}
+		resp := &analysis.RunsResponse{}
+		if err := json.Unmarshal(body, resp); err != nil {
+			return fmt.Errorf("failed to parse analysis runs: %w", err)
+		}
+		analysis.RenderRunsMarkdown(os.Stdout, resp)
+		return nil
+
 	case "analyze-diff":
 		if len(args) < 2 {
 			return fmt.Errorf("比較する2つの groupId を指定してください")
@@ -158,7 +180,13 @@ func run() error {
 		}
 		d := analysis.Compare(before, after, *topN)
 		if *asJSON {
-			return printJSON(d)
+			// analyze / analyze-trend の --json と揃えて詰めて出す（AI が読む前提）
+			buf, err := json.Marshal(d)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(buf))
+			return nil
 		}
 		analysis.RenderDiffMarkdown(os.Stdout, d)
 		return nil
