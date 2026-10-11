@@ -209,6 +209,36 @@ func (h *Handler) getRuns(c echo.Context) error {
 	return compactJSON(c, resp)
 }
 
+// getDiff は GET /api/analysis/diff?before=<GroupId>&after=<GroupId>[&top=N]。
+// pprotein-cli analyze-diff --json と同じものを返す（UI の比較画面が使う）。
+func (h *Handler) getDiff(c echo.Context) error {
+	before, after := c.QueryParam("before"), c.QueryParam("after")
+	if before == "" || after == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "before and after are required")
+	}
+	top := defaultTop
+	if v, err := strconv.Atoi(c.QueryParam("top")); err == nil && v > 0 {
+		top = v
+	}
+	cfg, raw, err := h.loadConfig()
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	idx, err := loadEntryIndex(h.client)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	b, err := h.report(cfg, raw, idx, before)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	a, err := h.report(cfg, raw, idx, after)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusNotFound, err.Error())
+	}
+	return compactJSON(c, Compare(b, a, top))
+}
+
 // Summarize は Report から推移を見るのに要る値だけを抜き出す。
 func Summarize(rep *Report) RunSummary {
 	t := rep.Totals

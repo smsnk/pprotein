@@ -1,0 +1,111 @@
+// analysis の3画面で共有する見た目。既存の trend 画面に合わせる。
+section {
+  padding: 2em;
+  overflow-y: auto;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 1em;
+  margin-bottom: 1em;
+}
+
+.detail {
+  margin-bottom: 1em;
+  padding: 0.6em 1em;
+  background: #f0f0f0;
+  border-left: 0.3em solid #999;
+  min-height: 3em;
+
+  .commit {
+    margin-top: 0.3em;
+    color: #555;
+  }
+}
+
+.pass {
+  color: #2c6fbb;
+}
+
+.fail {
+  color: #c0392b;
+}
+
+.warn,
+.warn-inline {
+  color: #a35b00;
+}
+
+.warn {
+  padding: 0.5em 1em;
+  background: #fff4e0;
+  border-left: 0.3em solid #e67e22;
+}
+
+h3 {
+  margin-top: 2em;
+}
+
+.note {
+  margin: 0.3em 0 0.6em 0;
+  color: #666;
+  font-size: 0.9em;
+}
+
+table {
+  border-collapse: collapse;
+  margin: 0.5em 0 1.5em 0;
+}
+
+th,
+td {
+  padding: 0.35em 0.8em;
+  border: 1px solid #ccc;
+  text-align: left;
+}
+
+tbody tr {
+  cursor: pointer;
+
+  &:hover,
+  &.hovered {
+    background: #f5f8fc;
+  }
+}
+
+.n {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.better {
+  color: #2c6fbb;
+}
+
+.worse {
+  color: #c0392b;
+}
+
+.error {
+  color: #c0392b;
+}
+
+.share {
+  display: inline-block;
+  height: 0.8em;
+  background: #2c6fbb;
+  border-radius: 0.15em;
+  margin-right: 0.4em;
+  vertical-align: middle;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 2em;
+
+  @media (max-width: 1100px) {
+    grid-template-columns: 1fr;
+  }
+}

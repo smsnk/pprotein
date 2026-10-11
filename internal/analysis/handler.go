@@ -45,6 +45,7 @@ func sanitize(raw []byte) ([]byte, error) {
 func (h *Handler) RegisterHandlers(g *echo.Group) {
 	h.config.RegisterHandlers(g.Group("/config"))
 	g.GET("", h.getRuns)
+	g.GET("/diff", h.getDiff)
 	g.GET("/:id", h.get)
 }
 
