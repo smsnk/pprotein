@@ -43,7 +43,7 @@ const state = {
   groups: [] as string[],
   entries: {} as { [key: string]: Entry },
 
-  settingKeys: ["group/targets", "httplog/config", "slowlog/config", "ptqd/config"],
+  settingKeys: ["group/targets", "httplog/config", "slowlog/config", "ptqd/config", "dbquery/config", "analysis/config"],
   settings: {} as { [key: string]: SettingRecord },
 };
 
