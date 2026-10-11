@@ -5,6 +5,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/smsnk/pprotein/internal/dbquery"
@@ -27,6 +28,14 @@ type (
 		Score *ScoreInfo
 		// ConfigHash は集計に使った設定のハッシュ。走行間の比較で定義の食い違いを見つけるのに使う。
 		ConfigHash ConfigHash
+		// Commit は httplog に記録されたアプリのコミット。無ければ nil。
+		Commit *Commit
+	}
+
+	Commit struct {
+		Hash    string
+		Message string
+		Ref     string `json:",omitempty"`
 	}
 
 	ScoreInfo struct {
@@ -42,12 +51,15 @@ type (
 		DBQuery string
 	}
 
+	// JSON のキーには単位を付ける（…Sec は秒、Rate… / Share は 0〜1 の割合）。
+	// AI がドキュメントを読まずに解釈できるようにするため。
 	Report struct {
 		GroupId    string
 		Origin     time.Time
-		Bucket     int
+		Bucket     int        `json:"BucketSec"`
 		Warnings   []string   `json:",omitempty"`
 		Score      *ScoreInfo `json:",omitempty"`
+		Commit     *Commit    `json:",omitempty"`
 		ConfigHash ConfigHash
 
 		// Totals は走行全体のリクエストの集計（収集開始より後のもの）。
@@ -74,40 +86,44 @@ type (
 		S3xx     int
 		S4xx     int
 		S5xx     int
-		Canceled int
-		P50      float64
-		P99      float64
+		Canceled int     `json:"S499"`
+		P50      float64 `json:"P50Sec"`
+		P99      float64 `json:"P99Sec"`
 		// PeakRequests は区間あたりの最大リクエスト数、PeakOffset はその区間の開始。
 		PeakRequests int
-		PeakOffset   int
+		PeakOffset   int `json:"PeakOffsetSec"`
 		// Endpoints は全エンドポイントの件数（Timeline.Endpoints と違って上位に絞らない）。
 		Endpoints map[string]int `json:",omitempty"`
 	}
 
 	SeriesStat struct {
 		Name string
+		// Role は系列の役割（score: 得点の項 / driver: 得点を生む母数 / penalty: 得点を減らすもの）。未設定なら空。
+		Role string `json:",omitempty"`
+		// Query は元の dbquery の name。ライフサイクルの開始・完了数は lifecycle:<name>。
+		Query string `json:",omitempty"`
 		// Agg は区間内の集約方法（sum / count / max / last）。ライフサイクルの開始・完了数は count。
 		Agg string
 		// Total は走行全体の値。sum / count は合計、max は最大、last は最後の区間の値。
 		Total float64
 		// T50 / T90 は sum / count の系列が合計の 50% / 90% に達した区間の終わり（収集開始からの秒）。
 		// 得点が前倒しで積み上がるようになったか（終盤の失速が直ったか）を見る。
-		T50 *int `json:",omitempty"`
-		T90 *int `json:",omitempty"`
+		T50 *int `json:"T50Sec,omitempty"`
+		T90 *int `json:"T90Sec,omitempty"`
 	}
 
 	Bucket struct {
 		// Offset は区間の開始（Origin からの秒）。
-		Offset   int
+		Offset   int `json:"OffsetSec"`
 		Requests int
 		S2xx     int
 		S3xx     int
 		S4xx     int
 		S5xx     int
 		// Canceled は 499（クライアントが待ちきれずに切った）。S4xx には入れない。
-		Canceled  int
-		P50       float64
-		P99       float64
+		Canceled  int                `json:"S499"`
+		P50       float64            `json:"P50Sec"`
+		P99       float64            `json:"P99Sec"`
 		Endpoints map[string]int     `json:",omitempty"`
 		Series    map[string]float64 `json:",omitempty"`
 	}
@@ -125,13 +141,13 @@ type (
 		// Reached はこの状態まで順に到達したエンティティの数。
 		Reached int
 		// Rate は1つ前の状態に到達したうち、この状態まで進んだ割合。
-		Rate float64
+		Rate float64 `json:"RateFromPrev"`
 		// StoppedHere はこの状態を最後に先へ進まなかったエンティティの数（離脱・途中で走行終了の両方を含む）。
 		StoppedHere int
 		// PerEntity は到達したエンティティ1つあたり、この状態のイベントが何回あったか（順序を問わない）。
 		PerEntity float64
 		// FromPrev は1つ前の状態からの所要秒数。
-		FromPrev *Quantiles `json:",omitempty"`
+		FromPrev *Quantiles `json:"FromPrevSec,omitempty"`
 	}
 
 	Quantiles struct {
@@ -160,6 +176,7 @@ func Analyze(cfg *Config, in *Input) *Report {
 		Bucket:  cfg.Bucket,
 
 		Score:      in.Score,
+		Commit:     in.Commit,
 		ConfigHash: in.ConfigHash,
 	}
 	rep.Warnings = append(rep.Warnings, in.Warnings...)
@@ -200,7 +217,8 @@ func Analyze(cfg *Config, in *Input) *Report {
 
 	rep.Timeline = tl.build(cfg.Top)
 	rep.Totals = totals(in, rep.Timeline)
-	rep.SeriesStats = seriesStats(rep.Timeline, tl.agg, cfg.Bucket)
+	rep.SeriesStats = seriesStats(rep.Timeline, tl.meta, cfg.Bucket)
+	roundReport(rep)
 	srcs := make([]string, 0, len(tl.before))
 	for src := range tl.before {
 		srcs = append(srcs, src)
@@ -239,8 +257,12 @@ type timelineBuilder struct {
 	// before は Origin より前で捨てた件数（出どころ別）。src は今足しているデータの出どころ。
 	before map[string]int
 	src    string
-	// agg は系列名ごとの集約方法。
-	agg map[string]string
+	// meta は系列名ごとの集約方法・役割・元のクエリ。
+	meta map[string]seriesMeta
+}
+
+type seriesMeta struct {
+	agg, role, query string
 }
 
 type bucketAcc struct {
@@ -258,7 +280,7 @@ func newTimelineBuilder(cfg *Config, origin float64) *timelineBuilder {
 		buckets: map[int]*bucketAcc{},
 		seen:    map[string]bool{},
 		before:  map[string]int{},
-		agg:     map[string]string{},
+		meta:    map[string]seriesMeta{},
 	}
 }
 
@@ -334,7 +356,7 @@ func (b *timelineBuilder) addSeries(def SeriesDef, q *dbquery.QueryResult) error
 			names = append(names, name)
 		}
 		b.declare(name)
-		b.agg[name] = def.Agg
+		b.meta[name] = seriesMeta{agg: def.Agg, role: def.Role, query: def.Query}
 		acc := b.at(t)
 		if acc == nil {
 			continue
@@ -367,7 +389,7 @@ func (b *timelineBuilder) addSeries(def SeriesDef, q *dbquery.QueryResult) error
 // addPoints は時刻の列を件数の系列として足す（ライフサイクルの開始・完了数）。
 func (b *timelineBuilder) addPoints(name string, ts []float64) {
 	b.declare(name)
-	b.agg[name] = "count"
+	b.meta[name] = seriesMeta{agg: "count", query: "lifecycle:" + strings.TrimSuffix(strings.TrimSuffix(name, ".started"), ".finished")}
 	for _, t := range ts {
 		if acc := b.at(t); acc != nil {
 			acc.series[name]++
@@ -460,15 +482,15 @@ func totals(in *Input, tl Timeline) Totals {
 }
 
 // seriesStats は系列ごとの走行全体の値と、合計の 50% / 90% に達した時刻を出す。
-func seriesStats(tl Timeline, aggs map[string]string, bucket int) []SeriesStat {
+func seriesStats(tl Timeline, metas map[string]seriesMeta, bucket int) []SeriesStat {
 	stats := []SeriesStat{}
 	for _, name := range tl.Series {
-		agg, ok := aggs[name]
+		m, ok := metas[name]
 		if !ok {
 			continue // 累積の系列は元の系列から導けるので出さない
 		}
-		st := SeriesStat{Name: name, Agg: agg}
-		switch agg {
+		st := SeriesStat{Name: name, Role: m.role, Query: m.query, Agg: m.agg}
+		switch m.agg {
 		case "sum", "count":
 			for _, b := range tl.Buckets {
 				st.Total += b.Series[name]
@@ -505,6 +527,44 @@ func seriesStats(tl Timeline, aggs map[string]string, bucket int) []SeriesStat {
 		stats = append(stats, st)
 	}
 	return stats
+}
+
+// roundReport は JSON に出す小数を丸める。float32 由来の 0.03299999237060547 のような桁は
+// 情報を持たずにトークンだけ食うので、秒はミリ秒、割合は 0.01% の単位にする。
+func roundReport(rep *Report) {
+	ms := func(v *float64) { *v = math.Round(*v*1000) / 1000 }
+	ratio := func(v *float64) { *v = math.Round(*v*1e4) / 1e4 }
+	ms(&rep.Totals.P50)
+	ms(&rep.Totals.P99)
+	for i := range rep.Timeline.Buckets {
+		b := &rep.Timeline.Buckets[i]
+		ms(&b.P50)
+		ms(&b.P99)
+		for k, v := range b.Series {
+			b.Series[k] = math.Round(v*1000) / 1000
+		}
+	}
+	for i := range rep.SeriesStats {
+		ms(&rep.SeriesStats[i].Total)
+	}
+	for i := range rep.Lifecycles {
+		for j := range rep.Lifecycles[i].Steps {
+			st := &rep.Lifecycles[i].Steps[j]
+			ratio(&st.Rate)
+			st.PerEntity = math.Round(st.PerEntity*100) / 100
+			if q := st.FromPrev; q != nil {
+				ms(&q.P50)
+				ms(&q.P90)
+				ms(&q.P99)
+				ms(&q.Max)
+			}
+		}
+	}
+	for i := range rep.Breakdowns {
+		for j := range rep.Breakdowns[i].Share {
+			ratio(&rep.Breakdowns[i].Share[j])
+		}
+	}
 }
 
 // --- ライフサイクル ---

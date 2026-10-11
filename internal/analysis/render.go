@@ -14,7 +14,13 @@ func RenderMarkdown(w io.Writer, rep *Report) {
 	if rep.Score != nil {
 		fmt.Fprintf(w, "- score: %s\n", scoreCell(rep.Score))
 	}
+	if c := rep.Commit; c != nil {
+		fmt.Fprintf(w, "- commit: %s %q\n", shortHash(c.Hash), c.Message)
+	}
 	fmt.Fprintf(w, "- 設定: analysis.yml %s / dbquery.yml %s\n", orDash(rep.ConfigHash.Analysis), orDash(rep.ConfigHash.DBQuery))
+	if roles := rolesLine(rep.SeriesStats); roles != "" {
+		fmt.Fprintf(w, "- 系列の役割: %s\n", roles)
+	}
 	for _, warn := range rep.Warnings {
 		fmt.Fprintf(w, "- **警告**: %s\n", warn)
 	}
@@ -127,6 +133,30 @@ func renderBreakdown(w io.Writer, b *BreakdownResult) {
 		writeRow(w, row)
 	}
 	fmt.Fprintln(w)
+}
+
+// rolesLine は「score: tip / driver: … / penalty: …」の形で系列の役割をまとめる。
+func rolesLine(stats []SeriesStat) string {
+	byRole := map[string][]string{}
+	for _, s := range stats {
+		if s.Role != "" {
+			byRole[s.Role] = append(byRole[s.Role], s.Name)
+		}
+	}
+	parts := []string{}
+	for _, r := range []string{"score", "driver", "penalty"} {
+		if len(byRole[r]) > 0 {
+			parts = append(parts, r+": "+strings.Join(byRole[r], ", "))
+		}
+	}
+	return strings.Join(parts, " / ")
+}
+
+func shortHash(h string) string {
+	if len(h) > 7 {
+		return h[:7]
+	}
+	return h
 }
 
 func writeRow(w io.Writer, cells []string) {

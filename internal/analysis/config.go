@@ -56,6 +56,9 @@ type (
 	SeriesDef struct {
 		Name  string `yaml:"name"`
 		Query string `yaml:"query"`
+		// Role は系列の役割。score（得点の項）/ driver（得点を生む母数）/ penalty（得点を減らすもの）。
+		// 出力に載るだけで集計は変わらない。AI や比較で「どれが得点か」を設定から引けるようにする。
+		Role string `yaml:"role"`
 		// Agg は区間内の集約方法。sum（既定）/ count / max / last。
 		Agg string `yaml:"agg"`
 		// Cumulative を true にすると区間ごとの値に加えて累積を出す（得点の積み上がりを見る）。
@@ -103,6 +106,11 @@ func ParseConfig(raw []byte) (*Config, error) {
 		s := &cfg.Series[i]
 		if s.Name == "" || s.Query == "" {
 			return nil, fmt.Errorf("series needs both name and query: %+v", *s)
+		}
+		switch s.Role {
+		case "", "score", "driver", "penalty":
+		default:
+			return nil, fmt.Errorf("series %s: role must be score, driver or penalty: %q", s.Name, s.Role)
 		}
 		switch s.Agg {
 		case "":
