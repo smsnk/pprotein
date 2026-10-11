@@ -58,7 +58,7 @@ func (h *Handler) get(c echo.Context) error {
 
 	id := c.Param("id")
 	if id == "latest" {
-		id, err = latestGroup(h.client)
+		id, err = LatestGroup(h.client)
 		if err != nil {
 			return echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
@@ -71,18 +71,20 @@ func (h *Handler) get(c echo.Context) error {
 	return c.JSON(http.StatusOK, Analyze(cfg, in))
 }
 
-func latestGroup(client *summary.Client) (string, error) {
+// LatestGroup は httplog がある最新の収集グループを返す。
+// 収集中（pending）のものも含める。走行直後に latest を引いて1つ前の走行が出ると、取り違えに気づけない。
+func LatestGroup(client *summary.Client) (string, error) {
 	entries, err := client.Entries("httplog")
 	if err != nil {
 		return "", err
 	}
-	ok := []summary.Entry{}
+	live := []summary.Entry{}
 	for _, e := range entries {
-		if e.Status == "ok" {
-			ok = append(ok, e)
+		if e.Status != "fail" {
+			live = append(live, e)
 		}
 	}
-	ids := summary.GroupIDs(ok)
+	ids := summary.GroupIDs(live)
 	if len(ids) == 0 {
 		return "", fmt.Errorf("no httplog is collected")
 	}
@@ -115,6 +117,7 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 	if err != nil {
 		return nil, err
 	}
+	in.Warnings = append(in.Warnings, incomplete("httplog", httplogs, groupId, cfg.HTTPLog.Label, false)...)
 	for _, e := range httplogs {
 		if e.Snapshot.GroupId != groupId || e.Status != "ok" {
 			continue
@@ -144,6 +147,8 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 				latest = e
 			}
 		}
+		// dbquery は手で再実行できるので、成功したものがあれば失敗の跡は無視する。
+		in.Warnings = append(in.Warnings, incomplete("dbquery", dbq, groupId, "", latest != nil)...)
 		if latest != nil {
 			body, err := client.Content("dbquery", latest.Snapshot.ID)
 			if err != nil {
@@ -160,8 +165,57 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 		}
 	}
 
-	if !found {
+	// 収集中・失敗しか無いときは、空の集計に警告を付けて返す（エラーの本文は CLI で切り詰められるため）。
+	if !found && len(in.Warnings) == 0 {
 		return nil, fmt.Errorf("group %s has neither httplog nor dbquery", groupId)
 	}
 	return in, nil
+}
+
+// incomplete は収集グループのうち確定していない（pending / fail の）エントリを警告文にする。
+// 黙って飛ばすと、収集中の走行がライフサイクル 0 件・リクエスト 0 件として読まれてしまう。
+func incomplete(typ string, entries []summary.Entry, groupId, label string, ignoreFail bool) []string {
+	warnings := []string{}
+	for _, e := range entries {
+		if e.Snapshot.GroupId != groupId {
+			continue
+		}
+		if label != "" && e.Snapshot.Label != label {
+			continue
+		}
+		name := typ
+		if e.Snapshot.Label != "" {
+			name += " " + e.Snapshot.Label
+		}
+		switch e.Status {
+		case "pending":
+			warnings = append(warnings, fmt.Sprintf("%s は収集中（pending）。この集計に含めていない。完了してから再実行する", name))
+		case "fail":
+			if !ignoreFail {
+				warnings = append(warnings, fmt.Sprintf("%s は収集に失敗した（%s）。この集計に含めていない", name, e.Message))
+			}
+		}
+	}
+	return warnings
+}
+
+// Pending は収集グループの httplog / dbquery のうち、まだ収集中のエントリの数を返す。
+func Pending(client *summary.Client, groupId string) (int, error) {
+	n := 0
+	for _, typ := range []string{"httplog", "dbquery"} {
+		entries, err := client.Entries(typ)
+		if err != nil {
+			// dbquery は無くてもよい
+			if typ == "dbquery" {
+				continue
+			}
+			return 0, err
+		}
+		for _, e := range entries {
+			if e.Snapshot.GroupId == groupId && e.Status == "pending" {
+				n++
+			}
+		}
+	}
+	return n, nil
 }

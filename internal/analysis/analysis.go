@@ -20,6 +20,8 @@ type (
 		// SkippedLines は時刻が読めず捨てた LTSV の行数。
 		SkippedLines int
 		Queries      map[string]*dbquery.QueryResult
+		// Warnings は材料を集める段階で見つかった問題（収集中・収集失敗のエントリなど）。
+		Warnings []string
 	}
 
 	Report struct {
@@ -104,6 +106,7 @@ func Analyze(cfg *Config, in *Input) *Report {
 		Origin:  time.Unix(0, int64(in.Origin*1e9)),
 		Bucket:  cfg.Bucket,
 	}
+	rep.Warnings = append(rep.Warnings, in.Warnings...)
 	if in.SkippedLines > 0 {
 		rep.Warnings = append(rep.Warnings, fmt.Sprintf("httplog: 時刻が読めない行を %d 行飛ばした", in.SkippedLines))
 	}

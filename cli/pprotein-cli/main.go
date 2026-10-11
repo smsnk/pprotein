@@ -39,7 +39,8 @@ flags:
   --top int        各表に出す件数 (既定 10)
   --json           JSON で出力する
   --wait           collect: 収集の完了を待つ (既定 true)
-  --timeout dur    collect: 完了待ちの上限 (既定 5m)
+                   analyze: 指定したときだけ、その収集の httplog / dbquery が確定するまで待つ
+  --timeout dur    collect / analyze --wait: 完了待ちの上限 (既定 5m)
 `
 
 func main() {
@@ -83,6 +84,13 @@ func run() error {
 		args = append(args, rest[0])
 		rest = rest[1:]
 	}
+	// analyze の --wait は既定で待たない。collect と同じフラグなので、明示されたかで分ける。
+	waitSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "wait" {
+			waitSet = true
+		}
+	})
 
 	c := summary.NewClient(*url)
 
@@ -125,6 +133,12 @@ func run() error {
 		id := "latest"
 		if len(args) > 0 {
 			id = args[0]
+		}
+		if waitSet && *wait {
+			var err error
+			if id, err = waitGroup(c, id, *timeout); err != nil {
+				return err
+			}
 		}
 		return printAnalysis(c, id, *asJSON)
 
@@ -262,6 +276,35 @@ func collect(c *summary.Client, topN int, asJSON, wait bool, timeout time.Durati
 		return printGroup(c, newID, topN, asJSON)
 	}
 	return fmt.Errorf("収集が %s 以内に完了しませんでした", timeout)
+}
+
+// waitGroup は収集グループの httplog / dbquery に pending が無くなるまで待つ。
+// 走行直後の analyze が、収集中の httplog を飛ばした空の集計を出すのを避ける。
+func waitGroup(c *summary.Client, id string, timeout time.Duration) (string, error) {
+	if id == "latest" {
+		latest, err := analysis.LatestGroup(c)
+		if err != nil {
+			return "", err
+		}
+		id = latest
+	}
+
+	deadline := time.Now().Add(timeout)
+	for {
+		pending, err := analysis.Pending(c, id)
+		if err != nil {
+			return "", err
+		}
+		if pending == 0 {
+			fmt.Fprintf(os.Stderr, "\r収集が確定しました: %s\n\n", id)
+			return id, nil
+		}
+		if !time.Now().Before(deadline) {
+			return "", fmt.Errorf("収集 %s が %s 以内に確定しませんでした（残り %d 件）", id, timeout, pending)
+		}
+		fmt.Fprintf(os.Stderr, "\r収集中 (%s): 残り %d 件 ", id, pending)
+		time.Sleep(3 * time.Second)
+	}
 }
 
 func printJSON(v any) error {
