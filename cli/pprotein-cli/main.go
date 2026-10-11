@@ -8,6 +8,7 @@
 //	pprotein-cli groups              収集の一覧（スコア付き）
 //	pprotein-cli diff <A> <B>        2つの収集を比較する
 //	pprotein-cli collect             収集を開始して完了まで待ち、そのまま要約する
+//	pprotein-cli analyze [groupId]   走行を時系列・ライフサイクル・内訳で集計する
 //
 // 接続先は --url（既定 http://localhost:9000、環境変数 PPROTEIN_URL でも指定できる）。
 package main
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/smsnk/pprotein/internal/analysis"
 	"github.com/smsnk/pprotein/internal/summary"
 )
 
@@ -30,6 +32,7 @@ usage:
   pprotein-cli groups [flags]
   pprotein-cli diff <before> <after> [flags]
   pprotein-cli collect [flags]
+  pprotein-cli analyze [groupId] [flags]   省略時は httplog がある最新の収集
 
 flags:
   --url string     pprotein の URL (既定 $PPROTEIN_URL または http://localhost:9000)
@@ -118,6 +121,13 @@ func run() error {
 	case "collect":
 		return collect(c, *topN, *asJSON, *wait, *timeout)
 
+	case "analyze":
+		id := "latest"
+		if len(args) > 0 {
+			id = args[0]
+		}
+		return printAnalysis(c, id, *asJSON)
+
 	default:
 		fmt.Print(usage)
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -133,6 +143,24 @@ func printGroup(c *summary.Client, id string, topN int, asJSON bool) error {
 		return printJSON(g)
 	}
 	fmt.Print(g.Markdown())
+	return nil
+}
+
+// printAnalysis は /api/analysis/:id を読む。集計はサーバー側で行う（生ログを手元に持ってこない）。
+func printAnalysis(c *summary.Client, id string, asJSON bool) error {
+	body, err := c.Content("analysis", id)
+	if err != nil {
+		return err
+	}
+	if asJSON {
+		fmt.Println(body)
+		return nil
+	}
+	rep := &analysis.Report{}
+	if err := json.Unmarshal([]byte(body), rep); err != nil {
+		return fmt.Errorf("failed to parse analysis: %w", err)
+	}
+	analysis.RenderMarkdown(os.Stdout, rep)
 	return nil
 }
 

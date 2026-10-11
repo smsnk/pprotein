@@ -89,6 +89,11 @@ func (c *Client) RawData(typ, id string) ([]byte, error) {
 	return c.get(fmt.Sprintf("/api/%s/data/%s", typ, id))
 }
 
+// Config は収集タイプの設定ファイル（alp.yml など）を返す。
+func (c *Client) Config(typ string) ([]byte, error) {
+	return c.get(fmt.Sprintf("/api/%s/config", typ))
+}
+
 // Score は収集に紐づいたスコアを返す。無ければ nil。
 func (c *Client) Score(id string) (*score.Value, error) {
 	body, err := c.get("/api/score/" + id)

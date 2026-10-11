@@ -6,8 +6,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 	"github.com/smsnk/pprotein/integration/echov4"
+	"github.com/smsnk/pprotein/internal/analysis"
 	"github.com/smsnk/pprotein/internal/collect"
 	"github.com/smsnk/pprotein/internal/collect/group"
+	"github.com/smsnk/pprotein/internal/dbquery"
 	"github.com/smsnk/pprotein/internal/event"
 	"github.com/smsnk/pprotein/internal/extproc"
 	"github.com/smsnk/pprotein/internal/extproc/alp"
@@ -134,6 +136,21 @@ func start() error {
 		return err
 	}
 
+	// 走行直後に流す SQL の結果。benchq などが走行後に GroupId 付きで POST する
+	dbqueryOpts := &collect.Options{
+		Type:     "dbquery",
+		Ext:      "-dbquery.json",
+		Store:    store,
+		EventHub: hub,
+	}
+	dbqueryHandler, err := dbquery.NewHandler(dbqueryOpts, store)
+	if err != nil {
+		return err
+	}
+	if err := dbqueryHandler.Register(api.Group("/dbquery")); err != nil {
+		return err
+	}
+
 	grp, err := group.NewCollector(store, port)
 	if err != nil {
 		return err
@@ -142,6 +159,13 @@ func start() error {
 
 	// 収集をまたいだ推移。集計は自分自身の API 経由で行う（processor のキャッシュが効く）
 	trend.NewHandler("http://localhost:" + port).RegisterHandlers(api.Group("/trend"))
+
+	// 1回の走行を種類をまたいで集計する（時系列・ライフサイクル・内訳）
+	analysisHandler, err := analysis.NewHandler("http://localhost:"+port, store)
+	if err != nil {
+		return err
+	}
+	analysisHandler.RegisterHandlers(api.Group("/analysis"))
 
 	return e.Start(":" + port)
 }

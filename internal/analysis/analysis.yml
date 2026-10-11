@@ -1,0 +1,34 @@
+# 1回の走行を「得点がいつ・どこで生まれたか」の観点で集計する設定。GET /api/analysis/<GroupId>
+# SQL は dbquery.yml に書き、ここではその name を参照する。
+# エンドポイントのまとめ方は alp.yml の matching_groups をそのまま使う。
+
+# 時系列の区間幅（秒）
+bucket: 5
+# 内訳・エンドポイント表に出す件数
+top: 10
+
+httplog:
+  # 時刻の LTSV キー。nginx に msec:$msec を足すとミリ秒で揃う（無ければ time を見る）
+  time_key: msec
+  # ライフサイクル（source: httplog）の識別子に使う LTSV キー。セッション cookie など
+  entity_key: ""
+
+# dbquery の結果から作る時系列。列 t（unix 時刻）、value、series（任意）
+series: []
+#  - name: score
+#    query: score_events
+#    agg: sum          # sum / count / max / last
+#    cumulative: true
+
+# dbquery の結果表をそのまま出す。value 列があれば構成比が付く
+breakdowns: []
+#  - name: 得点の多い順
+#    query: score_by_key
+
+# エンティティが順に進む状態。到達数・離脱・区間の所要時間を出す
+lifecycles: []
+#  - name: session
+#    source: httplog   # または query:<dbquery の name>（列 entity, state, t）
+#    steps:
+#      - name: login
+#        match: ^POST /api/login$
