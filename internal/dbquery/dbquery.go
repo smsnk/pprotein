@@ -10,7 +10,9 @@ package dbquery
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -26,7 +28,7 @@ type (
 		// DSN は go-sql-driver/mysql の形式。observer からはトンネル越しに繋ぐ。
 		DSN string `yaml:"dsn"`
 		// Timeout は1クエリあたりの上限。既定 30s。
-		Timeout string `yaml:"timeout,omitempty"`
+		Timeout string  `yaml:"timeout,omitempty"`
 		Queries []Query `yaml:"queries"`
 	}
 
@@ -38,9 +40,12 @@ type (
 
 	// Result は snapshot の本体として保存される JSON。
 	Result struct {
-		Since   int64
-		Until   int64
-		Queries []QueryResult
+		Since int64
+		Until int64
+		// ConfigHash は実行したときの dbquery.yml のハッシュ（HashConfig）。
+		// 走行間の比較で、SQL の定義が違う走行どうしを比べていないかを確かめるのに使う。
+		ConfigHash string `json:",omitempty"`
+		Queries    []QueryResult
 	}
 
 	QueryResult struct {
@@ -77,6 +82,12 @@ func (c *Config) timeout() time.Duration {
 		return d
 	}
 	return 30 * time.Second
+}
+
+// HashConfig は設定ファイルの中身を短いハッシュにする（SHA-256 の先頭12桁）。
+func HashConfig(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // Expand は {{since}} / {{until}} を置換する。

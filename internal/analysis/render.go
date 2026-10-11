@@ -11,6 +11,10 @@ import (
 func RenderMarkdown(w io.Writer, rep *Report) {
 	fmt.Fprintf(w, "# analysis %s\n\n", rep.GroupId)
 	fmt.Fprintf(w, "- 0s = 収集開始 %s / 区間幅 %ds\n", rep.Origin.Format("15:04:05"), rep.Bucket)
+	if rep.Score != nil {
+		fmt.Fprintf(w, "- score: %s\n", scoreCell(rep.Score))
+	}
+	fmt.Fprintf(w, "- 設定: analysis.yml %s / dbquery.yml %s\n", orDash(rep.ConfigHash.Analysis), orDash(rep.ConfigHash.DBQuery))
 	for _, warn := range rep.Warnings {
 		fmt.Fprintf(w, "- **警告**: %s\n", warn)
 	}
