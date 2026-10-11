@@ -9,6 +9,7 @@
 //	pprotein-cli diff <A> <B>        2つの収集を比較する
 //	pprotein-cli collect             収集を開始して完了まで待ち、そのまま要約する
 //	pprotein-cli analyze [groupId]   走行を時系列・ライフサイクル・内訳で集計する
+//	pprotein-cli analyze-diff <A> <B>  2つの走行の analyze を比較する
 //
 // 接続先は --url（既定 http://localhost:9000、環境変数 PPROTEIN_URL でも指定できる）。
 package main
@@ -33,6 +34,7 @@ usage:
   pprotein-cli diff <before> <after> [flags]
   pprotein-cli collect [flags]
   pprotein-cli analyze [groupId] [flags]   省略時は httplog がある最新の収集
+  pprotein-cli analyze-diff <before> <after> [flags]
 
 flags:
   --url string     pprotein の URL (既定 $PPROTEIN_URL または http://localhost:9000)
@@ -142,6 +144,25 @@ func run() error {
 		}
 		return printAnalysis(c, id, *asJSON)
 
+	case "analyze-diff":
+		if len(args) < 2 {
+			return fmt.Errorf("比較する2つの groupId を指定してください")
+		}
+		before, err := fetchAnalysis(c, args[0])
+		if err != nil {
+			return err
+		}
+		after, err := fetchAnalysis(c, args[1])
+		if err != nil {
+			return err
+		}
+		d := analysis.Compare(before, after, *topN)
+		if *asJSON {
+			return printJSON(d)
+		}
+		analysis.RenderDiffMarkdown(os.Stdout, d)
+		return nil
+
 	default:
 		fmt.Print(usage)
 		return fmt.Errorf("unknown command: %s", cmd)
@@ -176,6 +197,18 @@ func printAnalysis(c *summary.Client, id string, asJSON bool) error {
 	}
 	analysis.RenderMarkdown(os.Stdout, rep)
 	return nil
+}
+
+func fetchAnalysis(c *summary.Client, id string) (*analysis.Report, error) {
+	body, err := c.Content("analysis", id)
+	if err != nil {
+		return nil, err
+	}
+	rep := &analysis.Report{}
+	if err := json.Unmarshal([]byte(body), rep); err != nil {
+		return nil, fmt.Errorf("failed to parse analysis of %s: %w", id, err)
+	}
+	return rep, nil
 }
 
 func printGroups(c *summary.Client, asJSON bool) error {

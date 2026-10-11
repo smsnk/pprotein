@@ -22,13 +22,38 @@ type (
 		Queries      map[string]*dbquery.QueryResult
 		// Warnings は材料を集める段階で見つかった問題（収集中・収集失敗のエントリなど）。
 		Warnings []string
+
+		// Score はこの収集に紐づいたベンチのスコア。無ければ nil。
+		Score *ScoreInfo
+		// ConfigHash は集計に使った設定のハッシュ。走行間の比較で定義の食い違いを見つけるのに使う。
+		ConfigHash ConfigHash
+	}
+
+	ScoreInfo struct {
+		Value  int64
+		Passed bool
+	}
+
+	// ConfigHash の各値は設定ファイルの中身の SHA-256 の先頭12桁。取れなかったものは空。
+	ConfigHash struct {
+		// Analysis は集計したときの analysis.yml。
+		Analysis string
+		// DBQuery は dbquery を実行したときの dbquery.yml（dbquery の結果に記録されている）。
+		DBQuery string
 	}
 
 	Report struct {
-		GroupId  string
-		Origin   time.Time
-		Bucket   int
-		Warnings []string `json:",omitempty"`
+		GroupId    string
+		Origin     time.Time
+		Bucket     int
+		Warnings   []string   `json:",omitempty"`
+		Score      *ScoreInfo `json:",omitempty"`
+		ConfigHash ConfigHash
+
+		// Totals は走行全体のリクエストの集計（収集開始より後のもの）。
+		Totals Totals
+		// SeriesStats は時系列の系列ごとの集計（累積の系列は除く）。
+		SeriesStats []SeriesStat
 
 		Timeline   Timeline
 		Lifecycles []LifecycleResult
@@ -41,6 +66,34 @@ type (
 		// Endpoints は件数の多いエンドポイント（Buckets[].Endpoints のキー）。
 		Endpoints []string
 		Buckets   []Bucket
+	}
+
+	Totals struct {
+		Requests int
+		S2xx     int
+		S3xx     int
+		S4xx     int
+		S5xx     int
+		Canceled int
+		P50      float64
+		P99      float64
+		// PeakRequests は区間あたりの最大リクエスト数、PeakOffset はその区間の開始。
+		PeakRequests int
+		PeakOffset   int
+		// Endpoints は全エンドポイントの件数（Timeline.Endpoints と違って上位に絞らない）。
+		Endpoints map[string]int `json:",omitempty"`
+	}
+
+	SeriesStat struct {
+		Name string
+		// Agg は区間内の集約方法（sum / count / max / last）。ライフサイクルの開始・完了数は count。
+		Agg string
+		// Total は走行全体の値。sum / count は合計、max は最大、last は最後の区間の値。
+		Total float64
+		// T50 / T90 は sum / count の系列が合計の 50% / 90% に達した区間の終わり（収集開始からの秒）。
+		// 得点が前倒しで積み上がるようになったか（終盤の失速が直ったか）を見る。
+		T50 *int `json:",omitempty"`
+		T90 *int `json:",omitempty"`
 	}
 
 	Bucket struct {
@@ -105,6 +158,9 @@ func Analyze(cfg *Config, in *Input) *Report {
 		GroupId: in.GroupId,
 		Origin:  time.Unix(0, int64(in.Origin*1e9)),
 		Bucket:  cfg.Bucket,
+
+		Score:      in.Score,
+		ConfigHash: in.ConfigHash,
 	}
 	rep.Warnings = append(rep.Warnings, in.Warnings...)
 	if in.SkippedLines > 0 {
@@ -143,6 +199,8 @@ func Analyze(cfg *Config, in *Input) *Report {
 	}
 
 	rep.Timeline = tl.build(cfg.Top)
+	rep.Totals = totals(in, rep.Timeline)
+	rep.SeriesStats = seriesStats(rep.Timeline, tl.agg, cfg.Bucket)
 	srcs := make([]string, 0, len(tl.before))
 	for src := range tl.before {
 		srcs = append(srcs, src)
@@ -181,6 +239,8 @@ type timelineBuilder struct {
 	// before は Origin より前で捨てた件数（出どころ別）。src は今足しているデータの出どころ。
 	before map[string]int
 	src    string
+	// agg は系列名ごとの集約方法。
+	agg map[string]string
 }
 
 type bucketAcc struct {
@@ -198,6 +258,7 @@ func newTimelineBuilder(cfg *Config, origin float64) *timelineBuilder {
 		buckets: map[int]*bucketAcc{},
 		seen:    map[string]bool{},
 		before:  map[string]int{},
+		agg:     map[string]string{},
 	}
 }
 
@@ -273,6 +334,7 @@ func (b *timelineBuilder) addSeries(def SeriesDef, q *dbquery.QueryResult) error
 			names = append(names, name)
 		}
 		b.declare(name)
+		b.agg[name] = def.Agg
 		acc := b.at(t)
 		if acc == nil {
 			continue
@@ -305,6 +367,7 @@ func (b *timelineBuilder) addSeries(def SeriesDef, q *dbquery.QueryResult) error
 // addPoints は時刻の列を件数の系列として足す（ライフサイクルの開始・完了数）。
 func (b *timelineBuilder) addPoints(name string, ts []float64) {
 	b.declare(name)
+	b.agg[name] = "count"
 	for _, t := range ts {
 		if acc := b.at(t); acc != nil {
 			acc.series[name]++
@@ -362,6 +425,86 @@ func (b *timelineBuilder) build(top int) Timeline {
 		tl.Buckets = append(tl.Buckets, out)
 	}
 	return tl
+}
+
+// totals は走行全体のリクエストを集計する。時系列と同じく収集開始より前のものは除く。
+func totals(in *Input, tl Timeline) Totals {
+	t := Totals{Endpoints: map[string]int{}}
+	times := []float64{}
+	for i := range in.Requests {
+		r := &in.Requests[i]
+		if r.T < in.Origin {
+			continue
+		}
+		times = append(times, r.ReqTime)
+		t.Endpoints[r.Key()]++
+	}
+	for _, b := range tl.Buckets {
+		t.Requests += b.Requests
+		t.S2xx += b.S2xx
+		t.S3xx += b.S3xx
+		t.S4xx += b.S4xx
+		t.S5xx += b.S5xx
+		t.Canceled += b.Canceled
+		if b.Requests > t.PeakRequests {
+			t.PeakRequests = b.Requests
+			t.PeakOffset = b.Offset
+		}
+	}
+	if len(times) > 0 {
+		sort.Float64s(times)
+		t.P50 = quantile(times, 0.5)
+		t.P99 = quantile(times, 0.99)
+	}
+	return t
+}
+
+// seriesStats は系列ごとの走行全体の値と、合計の 50% / 90% に達した時刻を出す。
+func seriesStats(tl Timeline, aggs map[string]string, bucket int) []SeriesStat {
+	stats := []SeriesStat{}
+	for _, name := range tl.Series {
+		agg, ok := aggs[name]
+		if !ok {
+			continue // 累積の系列は元の系列から導けるので出さない
+		}
+		st := SeriesStat{Name: name, Agg: agg}
+		switch agg {
+		case "sum", "count":
+			for _, b := range tl.Buckets {
+				st.Total += b.Series[name]
+			}
+			if st.Total > 0 {
+				var cum float64
+				for _, b := range tl.Buckets {
+					cum += b.Series[name]
+					end := b.Offset + bucket
+					if st.T50 == nil && cum >= st.Total*0.5 {
+						st.T50 = &end
+					}
+					if st.T90 == nil && cum >= st.Total*0.9 {
+						st.T90 = &end
+						break
+					}
+				}
+			}
+		case "max":
+			found := false
+			for _, b := range tl.Buckets {
+				if v, ok := b.Series[name]; ok && (!found || v > st.Total) {
+					st.Total = v
+					found = true
+				}
+			}
+		case "last":
+			for _, b := range tl.Buckets {
+				if v, ok := b.Series[name]; ok {
+					st.Total = v
+				}
+			}
+		}
+		stats = append(stats, st)
+	}
+	return stats
 }
 
 // --- ライフサイクル ---

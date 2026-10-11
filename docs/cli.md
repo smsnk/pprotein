@@ -21,6 +21,8 @@ observer に置いてもよいし、手元から API 越しに叩いてもよい
 | `groups` | 収集の一覧（スコア・コミット付き） |
 | `diff <before> <after>` | 2つの収集を比較する |
 | `collect` | 収集を開始して完了まで待ち、そのまま要約する |
+| `analyze [groupId]` | 走行を時系列・ライフサイクル・内訳で集計する（[analysis.md](analysis.md)） |
+| `analyze-diff <before> <after>` | 2つの走行の analyze を比べる |
 
 共通フラグ: `--top N`（各表の件数、既定 10）、`--json`、`--url`。
 

@@ -68,6 +68,7 @@ func (h *Handler) get(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
+	in.ConfigHash.Analysis = dbquery.HashConfig(raw)
 	return c.JSON(http.StatusOK, Analyze(cfg, in))
 }
 
@@ -161,7 +162,27 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 			for i := range res.Queries {
 				in.Queries[res.Queries[i].Name] = &res.Queries[i]
 			}
+			in.ConfigHash.DBQuery = res.ConfigHash
 			found = true
+		}
+	}
+
+	// スコアは無くてもよい（ベンチの結果を送っていない走行）。複数あれば新しいものを使う。
+	if scores, err := client.Entries("score"); err == nil {
+		var latest *summary.Entry
+		for i := range scores {
+			e := &scores[i]
+			if e.Snapshot.GroupId != groupId || e.Status != "ok" {
+				continue
+			}
+			if latest == nil || e.Snapshot.Datetime.After(latest.Snapshot.Datetime) {
+				latest = e
+			}
+		}
+		if latest != nil {
+			if v, err := client.Score(latest.Snapshot.ID); err == nil {
+				in.Score = &ScoreInfo{Value: v.Score, Passed: v.Passed}
+			}
 		}
 	}
 

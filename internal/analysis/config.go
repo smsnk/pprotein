@@ -35,9 +35,9 @@ type (
 
 		HTTPLog HTTPLogConfig `yaml:"httplog"`
 
-		Series     []SeriesDef     `yaml:"series"`
-		Breakdowns []BreakdownDef  `yaml:"breakdowns"`
-		Lifecycles []LifecycleDef  `yaml:"lifecycles"`
+		Series     []SeriesDef    `yaml:"series"`
+		Breakdowns []BreakdownDef `yaml:"breakdowns"`
+		Lifecycles []LifecycleDef `yaml:"lifecycles"`
 	}
 
 	HTTPLogConfig struct {

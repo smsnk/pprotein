@@ -114,6 +114,7 @@ func (h *handler) postIndex(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadGateway, err.Error())
 	}
+	res.ConfigHash = HashConfig(raw)
 	buf, err := json.Marshal(res)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to marshal result: %v", err))
