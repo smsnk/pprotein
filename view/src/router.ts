@@ -12,6 +12,9 @@ import PtqdEntry from "./components/PtqdEntry.vue";
 import ScoreEntry from "./components/ScoreEntry.vue";
 import ResourceEntry from "./components/ResourceEntry.vue";
 import Trend from "./components/Trend.vue";
+import AnalysisRuns from "./components/AnalysisRuns.vue";
+import AnalysisRun from "./components/AnalysisRun.vue";
+import AnalysisDiff from "./components/AnalysisDiff.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -25,6 +28,27 @@ export default createRouter({
       component: Trend,
       meta: {
         title: "trend",
+      },
+    },
+    {
+      path: "/analysis/",
+      component: AnalysisRuns,
+      meta: {
+        title: "analysis",
+      },
+    },
+    {
+      path: "/analysis/diff/:a/:b/",
+      component: AnalysisDiff,
+      meta: {
+        title: "analysis diff",
+      },
+    },
+    {
+      path: "/analysis/:gid/",
+      component: AnalysisRun,
+      meta: {
+        title: "analysis {{gid}}",
       },
     },
     {

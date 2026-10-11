@@ -10,6 +10,9 @@
       <router-link v-slot="{ navigate, isActive }" to="/trend/" custom>
         <div :class="{ active: isActive }" @click="navigate">trend</div>
       </router-link>
+      <router-link v-slot="{ navigate, isActive }" to="/analysis/" custom>
+        <div :class="{ active: isActive }" @click="navigate">analysis</div>
+      </router-link>
       <router-link v-slot="{ navigate, isActive }" to="/score/" custom>
         <div :class="{ active: isActive }" @click="navigate">score</div>
       </router-link>
