@@ -26,9 +26,11 @@ breakdowns: []
 #    query: score_by_key
 
 # エンティティが順に進む状態。到達数・離脱・区間の所要時間を出す
+# source: httplog の識別子は cookie なので、cookie を発行する要求（ログインなど）は
+# まだ識別子を持たず、最初の状態にできない。cookie が付いた後の要求を起点にする
 lifecycles: []
 #  - name: session
 #    source: httplog   # または query:<dbquery の name>（列 entity, state, t）
 #    steps:
-#      - name: login
-#        match: ^POST /api/login$
+#      - name: enter
+#        match: ^POST .*/enter[$]?$
