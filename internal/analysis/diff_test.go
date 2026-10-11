@@ -2,6 +2,7 @@ package analysis
 
 import (
 	"bytes"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"testing"
@@ -193,5 +194,54 @@ func TestCompareBreakdowns(t *testing.T) {
 	}
 	if nk := d.Breakdowns[1]; nk.Keyed || *nk.RowsBefore != 1 || *nk.RowsAfter != 2 {
 		t.Errorf("unkeyed = %+v", nk)
+	}
+}
+
+// AI がドキュメント無しで読めるように、JSON のキーに単位が付き、小数が丸まっていること。
+func TestReportJSONIsSelfDescribing(t *testing.T) {
+	cfg := mustConfig(t, `
+httplog:
+  entity_key: session
+series:
+  - {name: tip, query: tips, role: score}
+lifecycles:
+  - name: viewer
+    source: httplog
+    steps:
+      - {name: a, match: ^GET /a$}
+      - {name: b, match: ^GET /b$}
+`)
+	in := &Input{
+		Origin: origin,
+		Requests: []Request{
+			{T: origin + 1, Method: "GET", Endpoint: "/a", Status: 499, ReqTime: 0.03299999237060547, Entity: "x"},
+			{T: origin + 1.0329999, Method: "GET", Endpoint: "/b", Status: 200, ReqTime: 0.1, Entity: "x"},
+		},
+		Queries: map[string]*dbquery.QueryResult{
+			"tips": {Columns: []string{"t", "value"}, Rows: rows([]string{"1700000002", "10"})},
+		},
+	}
+	buf, err := json.Marshal(Analyze(cfg, in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(buf)
+	for _, want := range []string{
+		`"BucketSec":5`, `"S499":1`, `"P50Sec":0.033`, `"OffsetSec":0`, `"T50Sec":5`,
+		`"RateFromPrev":1`, `"FromPrevSec":{"P50":0.033`, `"Role":"score"`, `"Query":"tips"`,
+		`"Query":"lifecycle:viewer"`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("JSON lacks %s:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "0.03299999") {
+		t.Errorf("JSON has unrounded floats:\n%s", out)
+	}
+}
+
+func TestParseConfigRejectsUnknownRole(t *testing.T) {
+	if _, err := ParseConfig([]byte("series:\n  - {name: x, query: q, role: bonus}\n")); err == nil {
+		t.Fatal("want error")
 	}
 }

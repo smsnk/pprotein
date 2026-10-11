@@ -40,12 +40,13 @@ type (
 	// SeriesDiff は系列1本。片方にしか無い系列は Before / After の片方が nil。
 	SeriesDiff struct {
 		Name      string
+		Role      string   `json:",omitempty"`
 		Before    *float64 `json:",omitempty"`
 		After     *float64 `json:",omitempty"`
-		T50Before *int     `json:",omitempty"`
-		T50After  *int     `json:",omitempty"`
-		T90Before *int     `json:",omitempty"`
-		T90After  *int     `json:",omitempty"`
+		T50Before *int     `json:"T50SecBefore,omitempty"`
+		T50After  *int     `json:"T50SecAfter,omitempty"`
+		T90Before *int     `json:"T90SecBefore,omitempty"`
+		T90After  *int     `json:"T90SecAfter,omitempty"`
 	}
 
 	MetricDiff struct {
@@ -145,11 +146,15 @@ func compareSeries(before, after []SeriesStat) []SeriesDiff {
 		sd := get(s.Name)
 		v := s.Total
 		sd.Before, sd.T50Before, sd.T90Before = &v, s.T50, s.T90
+		sd.Role = s.Role
 	}
 	for _, s := range after {
 		sd := get(s.Name)
 		v := s.Total
 		sd.After, sd.T50After, sd.T90After = &v, s.T50, s.T90
+		if s.Role != "" {
+			sd.Role = s.Role
+		}
 	}
 	out := make([]SeriesDiff, 0, len(order))
 	for _, name := range order {
@@ -389,14 +394,18 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 		writeRow(w, []string{"系列", "before", "after", "差", "%", "50%到達", "90%到達"})
 		writeSep(w, 7)
 		for _, s := range d.Series {
+			name := s.Name
+			if s.Role != "" {
+				name += " [" + s.Role + "]"
+			}
 			switch {
 			case s.Before == nil:
-				writeRow(w, []string{s.Name, "（なし）", num(*s.After), "追加", "", "", ""})
+				writeRow(w, []string{name, "（なし）", num(*s.After), "追加", "", "", ""})
 			case s.After == nil:
-				writeRow(w, []string{s.Name, num(*s.Before), "（なし）", "削除", "", "", ""})
+				writeRow(w, []string{name, num(*s.Before), "（なし）", "削除", "", "", ""})
 			default:
 				writeRow(w, []string{
-					s.Name, num(*s.Before), num(*s.After), signed(*s.After - *s.Before), pctChange(*s.Before, *s.After),
+					name, num(*s.Before), num(*s.After), signed(*s.After - *s.Before), pctChange(*s.Before, *s.After),
 					arrowSec(s.T50Before, s.T50After), arrowSec(s.T90Before, s.T90After),
 				})
 			}

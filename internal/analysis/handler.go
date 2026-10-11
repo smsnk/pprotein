@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -126,6 +127,10 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 		if cfg.HTTPLog.Label != "" && e.Snapshot.Label != cfg.HTTPLog.Label {
 			continue
 		}
+		if in.Commit == nil && e.Snapshot.Repository != nil && e.Snapshot.Repository.Hash != "" {
+			r := e.Snapshot.Repository
+			in.Commit = &Commit{Hash: r.Hash, Message: firstLine(r.Message), Ref: r.Ref}
+		}
 		data, err := client.RawData("httplog", e.Snapshot.ID)
 		if err != nil {
 			return nil, err
@@ -191,6 +196,13 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 		return nil, fmt.Errorf("group %s has neither httplog nor dbquery", groupId)
 	}
 	return in, nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 // incomplete は収集グループのうち確定していない（pending / fail の）エントリを警告文にする。
