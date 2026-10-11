@@ -11,6 +11,7 @@ ISUCON では alp の上位がスコアに1点も寄与しないことが普通�
 | `analysis` | 1つの収集グループについて、httplog の生ログと dbquery の結果を時刻で揃えて集計する |
 | `pprotein-cli analyze` | analysis を Markdown で出す（エージェント向け） |
 | `pprotein-cli analyze-diff` | 2つの走行の analysis を比べる（施策の前後で何が変わったか） |
+| `pprotein-cli analyze-trend` | 直近の走行を1行ずつ並べる（施策を重ねた推移） |
 
 回ごとの知識（どの SQL が得点か、利用者がどの順で進むか）は `dbquery.yml` と `analysis.yml` に置き、
 コードには持たない。エンドポイントのまとめ方は `alp.yml` の `matching_groups` をそのまま使う。
@@ -25,6 +26,29 @@ ISUCON では alp の上位がスコアに1点も寄与しないことが普通�
 - **ライフサイクル**: エンティティ（利用者・ライドなど）が状態を順に進む様子。
   状態ごとの到達数・前の状態からの到達率・そこで止まった数・1件あたりの回数・前の状態からの所要時間
 - **内訳**: SQL の結果表。`value` 列があれば構成比を付ける
+
+## AI に読ませる（JSON）
+
+Markdown は人が端末で読むためのもの。エージェントやスクリプトは JSON を読む。
+
+| 読み込み口 | 内容 | 大きさの目安（ISUCON13 の1走行） |
+| --- | --- | --- |
+| `GET /api/analysis/<GroupId>`（`latest` 可）/ `pprotein-cli analyze <GroupId> --json` | 1走行の全部 | 7.6KB |
+| `GET /api/analysis?limit=N` / `pprotein-cli analyze-trend --limit N --json` | 走行ごとの要約（古い順） | 1走行あたり約 2KB |
+| `pprotein-cli analyze-diff <A> <B> --json` | 2走行の比較 | 6.9KB |
+
+ドキュメントを読まなくても解釈できるようにしてある。
+
+- **キーに単位が付いている。** `…Sec` は秒、`RateFromPrev` と `Share` は 0〜1 の割合、`S499` は 499 の件数
+- **系列に役割と出どころが付いている。** `SeriesStats[].Role` が `score`（得点の項）/ `driver`（得点を生む母数）/
+  `penalty`（得点を減らすもの）。`Query` は元の dbquery の name（ライフサイクルの開始・完了数は `lifecycle:<name>`）
+- **時系列は列ごとの配列。** `Timeline.OffsetSec` と同じ並びで、`Requests` / `P99Sec` / `Series[].Values` /
+  `Endpoints[].Values` が並ぶ。系列の値が無い区間は `null`
+- 秒はミリ秒、割合は 0.01% の単位に丸めてある
+- `Commit` はアプリのコミット（httplog に記録されたもの）、`ConfigHash` は集計に使った設定のハッシュ
+
+走行の要約はサーバー側でキャッシュする（材料と設定が変わらなければ集計し直さない）。
+収集中のエントリがある走行はキャッシュせず、`Warnings` に理由が入る。
 
 ## 走行を比べる（analyze-diff）
 
@@ -51,11 +75,12 @@ pprotein-cli analyze-diff <before の GroupId> <after の GroupId> [--top N] [--
 
 ## 系列の選び方
 
-`analyze-diff` が比べる系列は、競技開始直後に `analysis.yml` で決める。マニュアルから次の順に拾う。
+`analyze-diff` が比べる系列は、競技開始直後に `analysis.yml` で決める。マニュアルから次の順に拾い、
+`role` に書く（出力に載るだけで集計は変わらない）。
 
-1. **得点の項（必須）**: スコア計算式の項ごとに1系列。項が複数なら `series` 列で分ける。合計がベンチのスコアと合うかで確かめる
-2. **得点を生む母数**: 世界観の節で「増えると得点が伸びる」と書かれているもの（利用者・予約・椅子の数など）
-3. **得点を減らすもの**: 減点や、得点を下げると書かれているもの
+1. **得点の項（必須、`role: score`）**: スコア計算式の項ごとに1系列。項が複数なら `series` 列で分ける。合計がベンチのスコアと合うかで確かめる
+2. **得点を生む母数（`role: driver`）**: 世界観の節で「増えると得点が伸びる」と書かれているもの（利用者・予約・椅子の数など）
+3. **得点を減らすもの（`role: penalty`）**: 減点や、得点を下げると書かれているもの
 
 2 と 3 はマニュアルの読みに依存するので外れることがある。合わせて 5〜8 本に抑える。
 DB に得点の材料が無い回は、httplog のエンドポイント構成比とリクエストの合計が代わりになる（系列を書かなくても出る）。
@@ -107,7 +132,7 @@ httplog:
   time_key: msec          # nginx に msec:$msec を足す。無ければ time を見る
   entity_key: session     # nginx に session:$cookie_<名前> を足す
 series:
-  - {name: tip, query: tips, cumulative: true}        # 列 t, value[, series]
+  - {name: tip, query: tips, role: score, cumulative: true}   # 列 t, value[, series]
 breakdowns:
   - {name: 配信者別, query: tips_by_streamer}          # 結果表をそのまま
 lifecycles:

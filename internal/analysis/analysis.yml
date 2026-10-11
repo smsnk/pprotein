@@ -17,6 +17,7 @@ httplog:
 series: []
 #  - name: score
 #    query: score_events
+#    role: score       # score（得点の項）/ driver（得点を生む母数）/ penalty（得点を減らすもの）
 #    agg: sum          # sum / count / max / last
 #    cumulative: true
 
