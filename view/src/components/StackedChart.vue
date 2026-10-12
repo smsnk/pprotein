@@ -2,6 +2,7 @@
   <figure>
     <figcaption>
       {{ title }}
+      <span v-if="xLabel" class="axis">（横軸: {{ xLabel }}）</span>
       <span v-for="(s, i) in series" :key="s.name" class="legend">
         <i :style="{ backgroundColor: color(i) }" />{{ s.name }}
       </span>
@@ -9,8 +10,10 @@
     <svg
       :viewBox="`0 0 ${W} ${H}`"
       preserveAspectRatio="none"
+      :class="{ clickable }"
       @mousemove="onMove"
       @mouseleave="$emit('hover', -1)"
+      @click="onClick"
     >
       <g v-for="t in ticks" :key="t.value">
         <line :x1="PAD.l" :x2="W - PAD.r" :y1="t.y" :y2="t.y" class="grid" />
@@ -97,8 +100,12 @@ export default defineComponent({
     points: { type: Array as PropType<{ label: string }[]>, required: true },
     series: { type: Array as PropType<StackSeries[]>, required: true },
     hovered: { type: Number, default: -1 },
+    // xLabel は横軸の説明（キャプションに出す）
+    xLabel: { type: String, default: "" },
+    // clickable なら棒のクリックで select（棒の番号）を出す
+    clickable: { type: Boolean, default: false },
   },
-  emits: ["hover"],
+  emits: ["hover", "select"],
   data() {
     return {
       W: 900,
@@ -191,14 +198,24 @@ export default defineComponent({
       if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
       return v.toFixed(0);
     },
-    onMove(e: MouseEvent) {
+    indexAt(e: MouseEvent) {
       const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
       const px = (e.clientX - rect.left) * (this.W / rect.width);
       const n = this.points.length;
-      if (!n) return;
+      if (!n) return -1;
       const slot = (this.W - this.PAD.l - this.PAD.r) / n;
       const i = Math.floor((px - this.PAD.l) / slot);
-      this.$emit("hover", Math.min(n - 1, Math.max(0, i)));
+      return Math.min(n - 1, Math.max(0, i));
+    },
+    onMove(e: MouseEvent) {
+      const i = this.indexAt(e);
+      if (i >= 0) this.$emit("hover", i);
+    },
+    onClick(e: MouseEvent) {
+      const i = this.indexAt(e);
+      if (this.clickable && i >= 0) {
+        this.$emit("select", i);
+      }
     },
   },
 });
@@ -207,6 +224,17 @@ export default defineComponent({
 <style scoped lang="scss">
 figure {
   margin: 0 0 2em 0;
+}
+
+.axis {
+  margin-left: 0.5em;
+  font-weight: normal;
+  font-size: 0.85em;
+  color: #777;
+}
+
+svg.clickable {
+  cursor: pointer;
 }
 
 figcaption {

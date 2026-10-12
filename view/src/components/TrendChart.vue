@@ -2,6 +2,7 @@
   <figure>
     <figcaption>
       {{ title }}
+      <span v-if="xLabel" class="axis">（横軸: {{ xLabel }}）</span>
       <span v-for="(s, i) in series" :key="s.name" class="legend">
         <i :style="{ backgroundColor: color(i) }" />{{ s.name }}
       </span>
@@ -9,8 +10,10 @@
     <svg
       :viewBox="`0 0 ${W} ${H}`"
       preserveAspectRatio="none"
+      :class="{ clickable }"
       @mousemove="onMove"
       @mouseleave="$emit('hover', -1)"
+      @click="onClick"
     >
       <!-- y 軸の目盛り -->
       <g v-for="t in ticks" :key="t.value">
@@ -80,8 +83,12 @@ export default defineComponent({
     series: { type: Array as PropType<Series[]>, required: true },
     hovered: { type: Number, default: -1 },
     unit: { type: String, default: "" },
+    // xLabel は横軸の説明（キャプションに出す）
+    xLabel: { type: String, default: "" },
+    // clickable なら点のクリックで select（点の番号）を出す
+    clickable: { type: Boolean, default: false },
   },
-  emits: ["hover"],
+  emits: ["hover", "select"],
   data() {
     return {
       W: 900,
@@ -153,7 +160,7 @@ export default defineComponent({
       if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
       return v.toFixed(v < 10 ? 1 : 0);
     },
-    onMove(e: MouseEvent) {
+    indexAt(e: MouseEvent) {
       const rect = (e.currentTarget as SVGElement).getBoundingClientRect();
       const ratio = this.W / rect.width;
       const px = (e.clientX - rect.left) * ratio;
@@ -166,7 +173,16 @@ export default defineComponent({
           best = i;
         }
       }
-      this.$emit("hover", best);
+      return best;
+    },
+    onMove(e: MouseEvent) {
+      this.$emit("hover", this.indexAt(e));
+    },
+    onClick(e: MouseEvent) {
+      const i = this.indexAt(e);
+      if (this.clickable && i >= 0) {
+        this.$emit("select", i);
+      }
     },
   },
 });
@@ -175,6 +191,17 @@ export default defineComponent({
 <style scoped lang="scss">
 figure {
   margin: 0 0 2em 0;
+}
+
+.axis {
+  margin-left: 0.5em;
+  font-weight: normal;
+  font-size: 0.85em;
+  color: #777;
+}
+
+svg.clickable {
+  cursor: pointer;
 }
 
 figcaption {

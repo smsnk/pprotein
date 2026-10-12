@@ -33,6 +33,7 @@
 
       <div class="grid2">
         <TrendChart
+          :x-label="`収集開始からの秒（${rep.BucketSec}秒区間）`"
           v-for="chart in charts"
           :key="chart.title"
           :title="chart.title"

@@ -24,6 +24,17 @@
         が違います。系列の値は、その境目の前後で比べられないことがあります。
       </p>
 
+      <p v-if="latest" class="jump">
+        直近の走行の時間推移を見る:
+        <router-link :to="`/analysis/${latest.GroupId}/`">{{
+          latest.GroupId
+        }}</router-link>
+        <span v-if="latest.Score">
+          / score {{ latest.Score.Value.toLocaleString() }}</span
+        >
+        <span v-if="latest.Commit"> / {{ shortHash(latest.Commit) }}</span>
+      </p>
+
       <div class="detail">
         <template v-if="current">
           <strong>{{ current.GroupId }}</strong>
@@ -42,11 +53,15 @@
           </div>
         </template>
         <span v-else
-          >グラフにカーソルを合わせると、その走行のコミットとスコアが出ます。</span
+          >グラフにカーソルを合わせると、その走行のコミットとスコアが出ます。クリックすると、その走行の時間推移（横軸:
+          収集開始からの秒）を開きます。</span
         >
       </div>
 
       <TrendChart
+        x-label="走行（コミット）。クリックでその走行の時間推移へ"
+        clickable
+        @select="open(runs[$event].GroupId)"
         v-for="chart in charts"
         :key="chart.title"
         :title="chart.title"
@@ -63,6 +78,9 @@
         残りは「その他」にまとめます（既定は直近の走行で件数の上位5件）。下の表はカーソルを合わせた走行の内訳です。
       </p>
       <StackedChart
+        x-label="走行（コミット）。クリックでその走行の時間推移へ"
+        clickable
+        @select="open(runs[$event].GroupId)"
         title="リクエスト件数（エンドポイント別の積み上げ）"
         :points="points"
         :series="endpointStack"
@@ -71,6 +89,9 @@
       />
       <div class="grid2">
         <TrendChart
+          x-label="走行（コミット）。クリックでその走行の時間推移へ"
+          clickable
+          @select="open(runs[$event].GroupId)"
           v-for="chart in endpointCharts"
           :key="chart.title"
           :title="chart.title"
@@ -174,6 +195,9 @@ export default defineComponent({
     };
   },
   computed: {
+    latest(): RunSummary | null {
+      return this.runs.length ? this.runs[this.runs.length - 1] : null;
+    },
     current(): RunSummary | null {
       return this.hovered >= 0 ? this.runs[this.hovered] ?? null : null;
     },
@@ -371,6 +395,11 @@ export default defineComponent({
 
 <style scoped lang="scss">
 @import "./analysis.scss";
+
+.jump {
+  margin: 0 0 1em 0;
+  font-size: 1.05em;
+}
 
 .ep-picker {
   display: grid;
