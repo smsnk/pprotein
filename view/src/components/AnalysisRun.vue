@@ -44,6 +44,12 @@
         />
       </div>
 
+      <EndpointPanel
+        v-if="rep.EndpointStats?.length"
+        :gid="gid"
+        :stats="rep.EndpointStats"
+      />
+
       <template v-for="l in rep.Lifecycles || []" :key="l.Name">
         <h3>
           ライフサイクル: {{ l.Name }}（{{ l.Entities }} エンティティ）
@@ -96,6 +102,7 @@
 import { defineComponent } from "vue";
 import TrendChart, { Series } from "./TrendChart.vue";
 import Funnel from "./Funnel.vue";
+import EndpointPanel from "./EndpointPanel.vue";
 import {
   ROLES,
   ROLE_LABEL,
@@ -103,13 +110,10 @@ import {
   getJSON,
   pct,
   shortHash,
-  prettyEndpoint,
 } from "../analysis";
 
-const TOP_ENDPOINTS = 6;
-
 export default defineComponent({
-  components: { TrendChart, Funnel },
+  components: { TrendChart, Funnel, EndpointPanel },
   data() {
     return {
       rep: null as Report | null,
@@ -189,13 +193,6 @@ export default defineComponent({
           { name: "p50", values: tl.P50Sec },
           { name: "p99", values: tl.P99Sec },
         ],
-      });
-      charts.push({
-        title: `エンドポイント別の件数（上位 ${TOP_ENDPOINTS}）`,
-        unit: "",
-        series: (tl.Endpoints || [])
-          .slice(0, TOP_ENDPOINTS)
-          .map((e) => ({ name: prettyEndpoint(e.Name), values: e.Values })),
       });
       for (const role of ROLES.filter((r) => r !== "score")) {
         const names = stats.filter((s) => s.Role === role).map((s) => s.Name);

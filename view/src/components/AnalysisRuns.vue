@@ -57,6 +57,30 @@
         @hover="hovered = $event"
       />
 
+      <h3>エンドポイント別の推移</h3>
+      <p class="note">
+        チェックしたエンドポイントの件数・構成比・p99
+        を走行ごとに並べます（既定は直近の走行で件数の上位3件）。
+      </p>
+      <div class="grid2">
+        <TrendChart
+          v-for="chart in endpointCharts"
+          :key="chart.title"
+          :title="chart.title"
+          :unit="chart.unit"
+          :points="points"
+          :series="chart.series"
+          :hovered="hovered"
+          @hover="hovered = $event"
+        />
+      </div>
+      <div class="ep-picker">
+        <label v-for="k in endpointKeys" :key="k">
+          <input v-model="endpoints" type="checkbox" :value="k" />
+          {{ prettyEndpoint(k) }}
+        </label>
+      </div>
+
       <h3>走行の一覧</h3>
       <p class="note">
         行をクリックするとその走行の詳細へ。2つにチェックを入れると比較できます（古い方が
@@ -124,6 +148,8 @@ import {
   num,
   sec,
   shortHash,
+  EndpointStat,
+  prettyEndpoint,
 } from "../analysis";
 
 export default defineComponent({
@@ -134,6 +160,7 @@ export default defineComponent({
       limit: 20,
       hovered: -1,
       selected: [] as string[],
+      endpoints: [] as string[],
       loading: false,
       error: "",
     };
@@ -170,6 +197,42 @@ export default defineComponent({
           (a, b) =>
             ROLES.indexOf(a.role as never) - ROLES.indexOf(b.role as never),
         );
+    },
+    // 直近の走行で件数の多い順、そのあとに過去の走行にしか無いもの
+    endpointKeys(): string[] {
+      const keys: string[] = [];
+      [...this.runs].reverse().forEach((r) =>
+        (r.Endpoints || []).forEach((e) => {
+          if (!keys.includes(e.Key)) keys.push(e.Key);
+        }),
+      );
+      return keys;
+    },
+    endpointCharts() {
+      const of = (r: RunSummary, key: string) =>
+        (r.Endpoints || []).find((e) => e.Key === key);
+      const series = (f: (e: EndpointStat) => number): Series[] =>
+        this.endpoints.map((k) => ({
+          name: prettyEndpoint(k),
+          values: this.runs.map((r) => {
+            const e = of(r, k);
+            return e ? f(e) : null;
+          }),
+        }));
+      return [
+        { title: "件数", unit: "", series: series((e) => e.Count) },
+        {
+          title: "構成比（%）",
+          unit: "",
+          series: series((e) => e.Share * 100),
+        },
+        { title: "p99", unit: "s", series: series((e) => e.P99Sec) },
+        {
+          title: "エラー + 499",
+          unit: "",
+          series: series((e) => e.Errors + e.S499),
+        },
+      ];
     },
     charts() {
       const charts: { title: string; unit: string; series: Series[] }[] = [];
@@ -264,6 +327,7 @@ export default defineComponent({
     await this.load();
   },
   methods: {
+    prettyEndpoint,
     num,
     sec,
     shortHash,
@@ -272,9 +336,12 @@ export default defineComponent({
       this.error = "";
       try {
         const data = await getJSON<{ Runs: RunSummary[] }>(
-          `/api/analysis?limit=${this.limit}`,
+          `/api/analysis?limit=${this.limit}&endpoints=1`,
         );
         this.runs = data.Runs || [];
+        if (!this.endpoints.length) {
+          this.endpoints = this.endpointKeys.slice(0, 3);
+        }
       } catch (e) {
         this.error = `${e instanceof Error ? e.message : e}`;
       } finally {
@@ -297,4 +364,16 @@ export default defineComponent({
 
 <style scoped lang="scss">
 @import "./analysis.scss";
+
+.ep-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 0.2em 1em;
+  margin-bottom: 1em;
+  font-size: 0.9em;
+
+  label {
+    cursor: pointer;
+  }
+}
 </style>

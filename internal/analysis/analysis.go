@@ -66,6 +66,8 @@ type (
 		Totals Totals
 		// SeriesStats は時系列の系列ごとの集計（累積の系列は除く）。
 		SeriesStats []SeriesStat
+		// EndpointStats は全エンドポイントの走行全体の集計（件数の多い順）。
+		EndpointStats []EndpointStat
 
 		Timeline   Timeline
 		Lifecycles []LifecycleResult
@@ -217,6 +219,7 @@ func Analyze(cfg *Config, in *Input) *Report {
 
 	rep.Timeline = tl.build(cfg.Top)
 	rep.Totals = totals(in, rep.Timeline)
+	rep.EndpointStats = endpointStats(in)
 	rep.SeriesStats = seriesStats(rep.Timeline, tl.meta, cfg.Bucket)
 	roundReport(rep)
 	srcs := make([]string, 0, len(tl.before))

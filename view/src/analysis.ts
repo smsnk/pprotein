@@ -96,6 +96,7 @@ export interface Report {
     Endpoints?: { [key: string]: number };
   };
   SeriesStats: SeriesStat[] | null;
+  EndpointStats?: EndpointStat[];
   Timeline: Timeline;
   Lifecycles: LifecycleResult[] | null;
   Breakdowns: BreakdownResult[] | null;
@@ -125,6 +126,7 @@ export interface RunSummary {
       }[]
     | null;
   TopEndpoints: { Key: string; Count: number; Share: number }[] | null;
+  Endpoints?: EndpointStat[];
 }
 
 export interface Diff {
@@ -308,4 +310,31 @@ export function prettyEndpoint(s: string): string {
     .replace(/\[[^\]]*\][+*]/g, ":x")
     .replace(/\.\+/g, ":x")
     .replace(/\^|\$/g, "");
+}
+
+// --- エンドポイント別（/api/analysis/:id/endpoints、Report.EndpointStats） ---
+
+export interface EndpointStat {
+  Key: string;
+  Count: number;
+  Share: number;
+  P50Sec: number;
+  P99Sec: number;
+  SumSec: number;
+  Errors: number;
+  S499: number;
+}
+
+export interface EndpointTimeline {
+  GroupId: string;
+  BucketSec: number;
+  OffsetSec: number[];
+  Endpoints: {
+    Key: string;
+    Count: number[];
+    P50Sec: number[];
+    P99Sec: number[];
+    Errors: number[];
+    S499: number[];
+  }[];
 }
