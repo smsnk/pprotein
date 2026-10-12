@@ -171,12 +171,7 @@ export default defineComponent({
           series: scoreNames.map(col).filter((s): s is Series => !!s),
         });
       }
-      // 総数とエラーは桁が違うので、同じ目盛りに乗せない
-      charts.push({
-        title: "リクエスト（区間ごと）",
-        unit: "",
-        series: [{ name: "requests", values: tl.Requests }],
-      });
+      // リクエスト総数は下のエンドポイント別の積み上げの棒の高さで見る
       charts.push({
         title: "エラー（区間ごと）",
         unit: "",

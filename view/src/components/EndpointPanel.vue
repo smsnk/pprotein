@@ -1,9 +1,17 @@
 <template>
   <div>
-    <h3>エンドポイント別（全 {{ stats.length }} 件）</h3>
+    <h3>リクエストの内訳（エンドポイント別、全 {{ stats.length }} 件）</h3>
     <p class="note">
-      チェックしたエンドポイントの区間ごとの件数・p99・エラーをグラフにします（既定は件数の上位3件）。
+      棒の高さが区間ごとのリクエスト総数、区分の厚みがエンドポイントごとの件数です。チェックしたエンドポイントを色分けし、
+      残りは「その他」にまとめます（既定は件数の上位5件）。下の表の行をクリックすると選択を切り替えます。
     </p>
+    <StackedChart
+      title="リクエスト件数（区間ごと、エンドポイント別の積み上げ）"
+      :points="points"
+      :series="stack"
+      :hovered="hovered"
+      @hover="hovered = $event"
+    />
     <div class="grid2">
       <TrendChart
         v-for="chart in charts"
@@ -62,6 +70,7 @@
 <script lang="ts">
 import { defineComponent, PropType } from "vue";
 import TrendChart, { Series } from "./TrendChart.vue";
+import StackedChart, { OTHER, StackSeries } from "./StackedChart.vue";
 import {
   EndpointStat,
   EndpointTimeline,
@@ -73,7 +82,7 @@ import {
 
 // 1走行のエンドポイントを選んで、区間ごとの推移をグラフにする。
 export default defineComponent({
-  components: { TrendChart },
+  components: { TrendChart, StackedChart },
   props: {
     gid: { type: String, required: true },
     stats: { type: Array as PropType<EndpointStat[]>, required: true },
@@ -81,7 +90,7 @@ export default defineComponent({
   data() {
     return {
       tl: null as EndpointTimeline | null,
-      selected: this.stats.slice(0, 3).map((s) => s.Key),
+      selected: this.stats.slice(0, 5).map((s) => s.Key),
       hovered: -1,
     };
   },
@@ -89,14 +98,30 @@ export default defineComponent({
     points() {
       return (this.tl?.OffsetSec || []).map((o) => ({ label: `${o}s` }));
     },
+    // 選んだエンドポイントの件数 + その他（全エンドポイントの合計との差）
+    stack(): StackSeries[] {
+      const eps = this.tl?.Endpoints || [];
+      const n = this.tl?.OffsetSec.length ?? 0;
+      const totals = Array.from({ length: n }, (_, i) =>
+        eps.reduce((sum, e) => sum + e.Count[i], 0),
+      );
+      const picked = this.selected
+        .map((k) => eps.find((e) => e.Key === k))
+        .filter((e): e is NonNullable<typeof e> => !!e)
+        .map((e) => ({ name: prettyEndpoint(e.Key), values: e.Count }));
+      const other = totals.map(
+        (t, i) => t - picked.reduce((sum, s) => sum + s.values[i], 0),
+      );
+      return [...picked, { name: OTHER, values: other }];
+    },
     charts() {
       const pick = (field: "Count" | "P99Sec" | "Errors" | "S499"): Series[] =>
         this.selected
           .map((k) => this.tl?.Endpoints.find((e) => e.Key === k))
           .filter((e): e is NonNullable<typeof e> => !!e)
           .map((e) => ({ name: prettyEndpoint(e.Key), values: e[field] }));
+      // 件数は積み上げの棒で見る。単位の違う p99 とエラーは折れ線で
       return [
-        { title: "件数（区間ごと）", unit: "", series: pick("Count") },
         { title: "p99（区間ごと）", unit: "s", series: pick("P99Sec") },
         {
           title: "エラー 4xx/5xx（区間ごと）",

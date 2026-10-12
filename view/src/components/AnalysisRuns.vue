@@ -57,11 +57,18 @@
         @hover="hovered = $event"
       />
 
-      <h3>エンドポイント別の推移</h3>
+      <h3>リクエストの内訳（エンドポイント別）</h3>
       <p class="note">
-        チェックしたエンドポイントの件数・構成比・p99
-        を走行ごとに並べます（既定は直近の走行で件数の上位3件）。
+        棒の高さがリクエスト総数、区分の厚みがエンドポイントごとの件数です。チェックしたエンドポイントを色分けし、
+        残りは「その他」にまとめます（既定は直近の走行で件数の上位5件）。下の表はカーソルを合わせた走行の内訳です。
       </p>
+      <StackedChart
+        title="リクエスト件数（エンドポイント別の積み上げ）"
+        :points="points"
+        :series="endpointStack"
+        :hovered="hovered"
+        @hover="hovered = $event"
+      />
       <div class="grid2">
         <TrendChart
           v-for="chart in endpointCharts"
@@ -140,6 +147,7 @@
 <script lang="ts">
 import { defineComponent } from "vue";
 import TrendChart, { Series } from "./TrendChart.vue";
+import StackedChart, { OTHER, StackSeries } from "./StackedChart.vue";
 import {
   ROLES,
   ROLE_LABEL,
@@ -153,7 +161,7 @@ import {
 } from "../analysis";
 
 export default defineComponent({
-  components: { TrendChart },
+  components: { TrendChart, StackedChart },
   data() {
     return {
       runs: [] as RunSummary[],
@@ -208,6 +216,20 @@ export default defineComponent({
       );
       return keys;
     },
+    // 選んだエンドポイントの件数 + その他（総数との差）。棒の高さが総数と一致する
+    endpointStack(): StackSeries[] {
+      const count = (r: RunSummary, key: string) =>
+        (r.Endpoints || []).find((e) => e.Key === key)?.Count ?? 0;
+      const picked = this.endpoints.map((k) => ({
+        name: prettyEndpoint(k),
+        values: this.runs.map((r) => count(r, k)),
+      }));
+      const other = this.runs.map(
+        (r, i) =>
+          r.Requests.Requests - picked.reduce((sum, s) => sum + s.values[i], 0),
+      );
+      return [...picked, { name: OTHER, values: other }];
+    },
     endpointCharts() {
       const of = (r: RunSummary, key: string) =>
         (r.Endpoints || []).find((e) => e.Key === key);
@@ -219,13 +241,8 @@ export default defineComponent({
             return e ? f(e) : null;
           }),
         }));
+      // 件数と構成比は積み上げの棒で見る。単位の違う p99 とエラーは折れ線で
       return [
-        { title: "件数", unit: "", series: series((e) => e.Count) },
-        {
-          title: "構成比（%）",
-          unit: "",
-          series: series((e) => e.Share * 100),
-        },
         { title: "p99", unit: "s", series: series((e) => e.P99Sec) },
         {
           title: "エラー + 499",
@@ -292,17 +309,7 @@ export default defineComponent({
         });
       }
 
-      // 総数とエラーは桁が違うので、同じ目盛りに乗せない
-      charts.push({
-        title: "リクエスト総数",
-        unit: "",
-        series: [
-          {
-            name: "requests",
-            values: this.runs.map((r) => r.Requests.Requests),
-          },
-        ],
-      });
+      // リクエスト総数はエンドポイント別の積み上げの棒の高さで見る
       charts.push({
         title: "エラー",
         unit: "",
@@ -340,7 +347,7 @@ export default defineComponent({
         );
         this.runs = data.Runs || [];
         if (!this.endpoints.length) {
-          this.endpoints = this.endpointKeys.slice(0, 3);
+          this.endpoints = this.endpointKeys.slice(0, 5);
         }
       } catch (e) {
         this.error = `${e instanceof Error ? e.message : e}`;
