@@ -46,6 +46,8 @@ type (
 		Lifecycles []LifecycleSummary
 		// TopEndpoints は件数の多いエンドポイント（構成の変化を追う）。
 		TopEndpoints []EndpointShare
+		// Endpoints は全エンドポイントの集計。?endpoints=1 のときだけ入る（走行数 × エンドポイント数で大きくなるため）。
+		Endpoints []EndpointStat `json:",omitempty"`
 	}
 
 	RequestSummary struct {
@@ -180,6 +182,8 @@ func (h *Handler) getRuns(c echo.Context) error {
 		limit = min(v, maxRunsLimit)
 	}
 
+	withEndpoints := c.QueryParam("endpoints") == "1"
+
 	idx, err := loadEntryIndex(h.client)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -204,7 +208,11 @@ func (h *Handler) getRuns(c echo.Context) error {
 		if err != nil {
 			continue // GroupId が時刻でない・材料が無い走行は飛ばす
 		}
-		resp.Runs = append(resp.Runs, Summarize(rep))
+		s := Summarize(rep)
+		if withEndpoints {
+			s.Endpoints = rep.EndpointStats
+		}
+		resp.Runs = append(resp.Runs, s)
 	}
 	return compactJSON(c, resp)
 }

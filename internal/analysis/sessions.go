@@ -307,24 +307,35 @@ func (idx *sessionIndex) transitions(lifecycle string, top int) *TransitionsResp
 
 // --- handlers ---
 
-// sessionIndexFor は1走行の sessionIndex を返す。走行の材料と設定が変わらなければ使い回す。
-func (h *Handler) sessionIndexFor(c echo.Context) (*sessionIndex, error) {
+// resolveRun は :id（latest 可）の走行を解決し、設定と、材料と設定が同じなら同じになるキャッシュのキーを返す。
+// 材料が確定していない（収集中の）走行はキーが空になり、キャッシュしない。
+func (h *Handler) resolveRun(c echo.Context) (*Config, string, string, error) {
 	cfg, raw, err := h.loadConfig()
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, "", "", echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 	id := c.Param("id")
 	if id == "latest" {
 		if id, err = LatestGroup(h.client); err != nil {
-			return nil, echo.NewHTTPError(http.StatusNotFound, err.Error())
+			return nil, "", "", echo.NewHTTPError(http.StatusNotFound, err.Error())
 		}
 	}
 	entries, err := loadEntryIndex(h.client)
 	if err != nil {
-		return nil, echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return nil, "", "", echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	hash := hashConfig(raw)
-	key := entries.fingerprint(id, hash)
+	return cfg, id, entries.fingerprint(id, hashConfig(raw)), nil
+}
+
+// sessionIndexFor は1走行の sessionIndex を返す。走行の材料と設定が変わらなければ使い回す。
+func (h *Handler) sessionIndexFor(c echo.Context) (*sessionIndex, error) {
+	cfg, id, key, err := h.resolveRun(c)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.HTTPLog.EntityKey == "" {
+		return nil, echo.NewHTTPError(http.StatusBadRequest, "analysis.yml の httplog.entity_key が空なのでセッションに束ねられない")
+	}
 	if key != "" {
 		if idx, ok := h.sessions.get(key); ok {
 			return idx, nil
@@ -333,9 +344,6 @@ func (h *Handler) sessionIndexFor(c echo.Context) (*sessionIndex, error) {
 	in, err := Load(h.client, cfg, id)
 	if err != nil {
 		return nil, echo.NewHTTPError(http.StatusNotFound, err.Error())
-	}
-	if cfg.HTTPLog.EntityKey == "" {
-		return nil, echo.NewHTTPError(http.StatusBadRequest, "analysis.yml の httplog.entity_key が空なのでセッションに束ねられない")
 	}
 	idx := buildSessionIndex(cfg, in)
 	if key != "" && len(in.Warnings) == 0 {

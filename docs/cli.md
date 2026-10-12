@@ -27,6 +27,7 @@ observer に置いてもよいし、手元から API 越しに叩いてもよい
 | `sessions <groupId> [--lifecycle NAME]` | セッション（利用者）の一覧 |
 | `session <groupId> <ID>` | 1セッションの要求の列 |
 | `transitions <groupId> [--lifecycle NAME]` | よくある遷移（次に叩くエンドポイント） |
+| `endpoints <groupId>` | エンドポイント別の件数・構成比・p50・p99・合計・エラー・499（全件） |
 
 共通フラグ: `--top N`（各表の件数、既定 10）、`--json`、`--url`。
 

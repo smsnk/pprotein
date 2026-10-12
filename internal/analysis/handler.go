@@ -26,6 +26,8 @@ type Handler struct {
 	cache  *memo[*Report]
 	// sessions はセッションの導線（sessions.go）の集計結果
 	sessions *memo[*sessionIndex]
+	// endpoints はエンドポイント別の区間ごとの集計（endpoints.go）
+	endpoints *memo[*EndpointTimeline]
 }
 
 func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
@@ -33,7 +35,7 @@ func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
-	return &Handler{client: summary.NewClient(selfURL), config: config, cache: newMemo[*Report](), sessions: newMemo[*sessionIndex]()}, nil
+	return &Handler{client: summary.NewClient(selfURL), config: config, cache: newMemo[*Report](), sessions: newMemo[*sessionIndex](), endpoints: newMemo[*EndpointTimeline]()}, nil
 }
 
 func sanitize(raw []byte) ([]byte, error) {
@@ -52,6 +54,7 @@ func (h *Handler) RegisterHandlers(g *echo.Group) {
 	g.GET("/:id/sessions", h.getSessions)
 	g.GET("/:id/sessions/:sid", h.getSession)
 	g.GET("/:id/transitions", h.getTransitions)
+	g.GET("/:id/endpoints", h.getEndpoints)
 }
 
 func (h *Handler) loadConfig() (*Config, []byte, error) {

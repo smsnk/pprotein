@@ -14,6 +14,7 @@
 //	pprotein-cli sessions <groupId>  セッション（利用者）の一覧
 //	pprotein-cli session <groupId> <ID>  1セッションの要求の列
 //	pprotein-cli transitions <groupId>   よくある遷移（次に叩くエンドポイント）
+//	pprotein-cli endpoints <groupId>     エンドポイント別の件数・応答時間・エラー（全件）
 //
 // 接続先は --url（既定 http://localhost:9000、環境変数 PPROTEIN_URL でも指定できる）。
 package main
@@ -45,6 +46,7 @@ usage:
   pprotein-cli sessions <groupId> [--lifecycle NAME] [flags]
   pprotein-cli session <groupId> <sessionId> [flags]
   pprotein-cli transitions <groupId> [--lifecycle NAME] [flags]
+  pprotein-cli endpoints <groupId> [flags]
 
 flags:
   --url string     pprotein の URL (既定 $PPROTEIN_URL または http://localhost:9000)
@@ -206,6 +208,25 @@ func run() error {
 			return err
 		}
 		analysis.RenderTransitionsMarkdown(os.Stdout, resp)
+		return nil
+
+	case "endpoints":
+		if len(args) < 1 {
+			return fmt.Errorf("groupId を指定してください")
+		}
+		rep, err := fetchAnalysis(c, args[0])
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			buf, err := json.Marshal(rep.EndpointStats)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(buf))
+			return nil
+		}
+		analysis.RenderEndpointsMarkdown(os.Stdout, rep.GroupId, rep.EndpointStats)
 		return nil
 
 	case "session":
