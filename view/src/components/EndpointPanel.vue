@@ -6,6 +6,7 @@
       残りは「その他」にまとめます（既定は件数の上位5件）。下の表の行をクリックすると選択を切り替えます。
     </p>
     <StackedChart
+      :x-label="`収集開始からの秒（${tl?.BucketSec ?? 5}秒区間）`"
       title="リクエスト件数（区間ごと、エンドポイント別の積み上げ）"
       :points="points"
       :series="stack"
@@ -14,6 +15,7 @@
     />
     <div class="grid2">
       <TrendChart
+        :x-label="`収集開始からの秒（${tl?.BucketSec ?? 5}秒区間）`"
         v-for="chart in charts"
         :key="chart.title"
         :title="chart.title"
