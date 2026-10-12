@@ -20,9 +20,13 @@ type Request struct {
 	T        float64
 	Method   string
 	Endpoint string // matching_groups でまとめた URI
-	Status   int
-	ReqTime  float64
-	Entity   string
+	// URI はまとめる前の URI（クエリ文字列を含む）、Host は vhost（配信者のサブドメインなど）。
+	// セッションの導線を1件ずつ見るときに使う。
+	URI     string
+	Host    string
+	Status  int
+	ReqTime float64
+	Entity  string
 }
 
 // Key はライフサイクルの状態に使う文字列。
@@ -90,6 +94,8 @@ func ParseLTSV(data []byte, n *Normalizer, timeKey, entityKey string) ([]Request
 			T:        t,
 			Method:   f["method"],
 			Endpoint: n.Normalize(f["uri"]),
+			URI:      f["uri"],
+			Host:     cleanValue(f["vhost"]),
 			Entity:   cleanValue(f[entityKey]),
 		}
 		r.Status, _ = strconv.Atoi(f["status"])

@@ -77,11 +77,11 @@ type (
 		Share float64
 	}
 
-	// reportCache は集計結果を覚えておく。生ログを読み直すのが重いので、
+	// memo は集計結果を覚えておく。生ログを読み直すのが重いので、
 	// 同じ材料・同じ設定なら使い回す。材料が確定していない（収集中の）走行は覚えない。
-	reportCache struct {
+	memo[T any] struct {
 		mu   sync.Mutex
-		data map[string]*Report
+		data map[string]T
 	}
 )
 
@@ -95,18 +95,18 @@ func compactJSON(c echo.Context, v any) error {
 	return c.JSONBlob(http.StatusOK, buf)
 }
 
-func newReportCache() *reportCache {
-	return &reportCache{data: map[string]*Report{}}
+func newMemo[T any]() *memo[T] {
+	return &memo[T]{data: map[string]T{}}
 }
 
-func (c *reportCache) get(key string) (*Report, bool) {
+func (c *memo[T]) get(key string) (T, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	r, ok := c.data[key]
 	return r, ok
 }
 
-func (c *reportCache) put(key string, r *Report) {
+func (c *memo[T]) put(key string, r T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.data[key] = r
@@ -150,7 +150,7 @@ func (idx entryIndex) fingerprint(groupId, configHash string) string {
 
 // report は1走行の Report を返す。キャッシュにあればそれを使う。
 func (h *Handler) report(cfg *Config, raw []byte, idx entryIndex, groupId string) (*Report, error) {
-	hash := dbquery.HashConfig(raw)
+	hash := hashConfig(raw)
 	key := idx.fingerprint(groupId, hash)
 	if key != "" {
 		if r, ok := h.cache.get(key); ok {
@@ -237,6 +237,10 @@ func (h *Handler) getDiff(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 	return compactJSON(c, Compare(b, a, top))
+}
+
+func hashConfig(raw []byte) string {
+	return dbquery.HashConfig(raw)
 }
 
 // Summarize は Report から推移を見るのに要る値だけを抜き出す。

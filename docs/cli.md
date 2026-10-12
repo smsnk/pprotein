@@ -24,6 +24,9 @@ observer に置いてもよいし、手元から API 越しに叩いてもよい
 | `analyze [groupId]` | 走行を時系列・ライフサイクル・内訳で集計する（[analysis.md](analysis.md)） |
 | `analyze-diff <before> <after>` | 2つの走行の analyze を比べる |
 | `analyze-trend [--limit N]` | 直近の走行を1行ずつ並べる（得点・母数・利用者の進み方の推移） |
+| `sessions <groupId> [--lifecycle NAME]` | セッション（利用者）の一覧 |
+| `session <groupId> <ID>` | 1セッションの要求の列 |
+| `transitions <groupId> [--lifecycle NAME]` | よくある遷移（次に叩くエンドポイント） |
 
 共通フラグ: `--top N`（各表の件数、既定 10）、`--json`、`--url`。
 

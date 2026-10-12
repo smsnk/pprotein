@@ -575,6 +575,27 @@ type event struct {
 	t      float64
 }
 
+// walkSteps は1つのエンティティの（時刻順の）イベント列で、状態を順にどこまで進んだかを返す。
+// cursor は到達した状態の数、times[j] は状態 j に到達した時刻、counts[j] は順序を問わず状態 j に当たった回数。
+// ライフサイクルの集計とセッション一覧で同じ判定を使う。
+func walkSteps(steps []Step, evs []event) (cursor int, times []float64, counts []int) {
+	n := len(steps)
+	times = make([]float64, n)
+	counts = make([]int, n)
+	for _, ev := range evs {
+		for j := range steps {
+			if steps[j].re.MatchString(ev.state) {
+				counts[j]++
+			}
+		}
+		if cursor < n && steps[cursor].re.MatchString(ev.state) {
+			times[cursor] = ev.t
+			cursor++
+		}
+	}
+	return cursor, times, counts
+}
+
 // analyzeLifecycle は集計結果と、時系列に載せる時刻の列（開始・完了）を返す。
 func analyzeLifecycle(def LifecycleDef, in *Input) (LifecycleResult, map[string][]float64) {
 	res := LifecycleResult{Name: def.Name}
@@ -622,20 +643,7 @@ func analyzeLifecycle(def LifecycleDef, in *Input) (LifecycleResult, map[string]
 
 	for _, evs := range byEntity {
 		sort.SliceStable(evs, func(i, j int) bool { return evs[i].t < evs[j].t })
-		cursor := 0
-		times := make([]float64, n)
-		counts := make([]int, n)
-		for _, ev := range evs {
-			for j := range def.Steps {
-				if def.Steps[j].re.MatchString(ev.state) {
-					counts[j]++
-				}
-			}
-			if cursor < n && def.Steps[cursor].re.MatchString(ev.state) {
-				times[cursor] = ev.t
-				cursor++
-			}
-		}
+		cursor, times, counts := walkSteps(def.Steps, evs)
 		if cursor == 0 {
 			continue
 		}

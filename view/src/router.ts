@@ -15,6 +15,8 @@ import Trend from "./components/Trend.vue";
 import AnalysisRuns from "./components/AnalysisRuns.vue";
 import AnalysisRun from "./components/AnalysisRun.vue";
 import AnalysisDiff from "./components/AnalysisDiff.vue";
+import AnalysisSessions from "./components/AnalysisSessions.vue";
+import AnalysisSession from "./components/AnalysisSession.vue";
 
 export default createRouter({
   history: createWebHashHistory(),
@@ -42,6 +44,20 @@ export default createRouter({
       component: AnalysisDiff,
       meta: {
         title: "analysis diff",
+      },
+    },
+    {
+      path: "/analysis/:gid/sessions/",
+      component: AnalysisSessions,
+      meta: {
+        title: "sessions {{gid}}",
+      },
+    },
+    {
+      path: "/analysis/:gid/sessions/:sid/",
+      component: AnalysisSession,
+      meta: {
+        title: "session {{sid}}",
       },
     },
     {

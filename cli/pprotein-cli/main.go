@@ -11,6 +11,9 @@
 //	pprotein-cli analyze [groupId]   走行を時系列・ライフサイクル・内訳で集計する
 //	pprotein-cli analyze-diff <A> <B>  2つの走行の analyze を比較する
 //	pprotein-cli analyze-trend       直近の走行の得点・母数・利用者の進み方を並べる
+//	pprotein-cli sessions <groupId>  セッション（利用者）の一覧
+//	pprotein-cli session <groupId> <ID>  1セッションの要求の列
+//	pprotein-cli transitions <groupId>   よくある遷移（次に叩くエンドポイント）
 //
 // 接続先は --url（既定 http://localhost:9000、環境変数 PPROTEIN_URL でも指定できる）。
 package main
@@ -39,11 +42,15 @@ usage:
   pprotein-cli analyze [groupId] [flags]   省略時は httplog がある最新の収集
   pprotein-cli analyze-diff <before> <after> [flags]
   pprotein-cli analyze-trend [--limit N] [flags]
+  pprotein-cli sessions <groupId> [--lifecycle NAME] [flags]
+  pprotein-cli session <groupId> <sessionId> [flags]
+  pprotein-cli transitions <groupId> [--lifecycle NAME] [flags]
 
 flags:
   --url string     pprotein の URL (既定 $PPROTEIN_URL または http://localhost:9000)
   --top int        各表に出す件数 (既定 10)
   --limit int      analyze-trend: 遡る走行の数 (既定 20、最大 100)
+  --lifecycle str  sessions / transitions: そのライフサイクルに入ったセッションに絞る
   --json           JSON で出力する
   --wait           collect: 収集の完了を待つ (既定 true)
                    analyze: 指定したときだけ、その収集の httplog / dbquery が確定するまで待つ
@@ -74,6 +81,7 @@ func run() error {
 	url := fs.String("url", envOr("PPROTEIN_URL", "http://localhost:9000"), "pprotein の URL")
 	topN := fs.Int("top", 10, "各表に出す件数")
 	limit := fs.Int("limit", 20, "analyze-trend: 遡る走行の数")
+	lifecycle := fs.String("lifecycle", "", "sessions / transitions: ライフサイクルで絞る")
 	asJSON := fs.Bool("json", false, "JSON で出力する")
 	wait := fs.Bool("wait", true, "collect: 収集の完了を待つ")
 	timeout := fs.Duration("timeout", 5*time.Minute, "collect: 完了待ちの上限")
@@ -164,6 +172,59 @@ func run() error {
 			return fmt.Errorf("failed to parse analysis runs: %w", err)
 		}
 		analysis.RenderRunsMarkdown(os.Stdout, resp)
+		return nil
+
+	case "sessions", "transitions":
+		if len(args) < 1 {
+			return fmt.Errorf("groupId を指定してください")
+		}
+		q := neturl.Values{}
+		if *lifecycle != "" {
+			q.Set("lifecycle", *lifecycle)
+		}
+		if cmd == "transitions" {
+			q.Set("top", strconv.Itoa(*topN*3))
+		}
+		body, err := c.GetQuery("/api/analysis/"+args[0]+"/"+cmd, q)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			fmt.Println(string(body))
+			return nil
+		}
+		if cmd == "sessions" {
+			resp := &analysis.SessionsResponse{}
+			if err := json.Unmarshal(body, resp); err != nil {
+				return err
+			}
+			analysis.RenderSessionsMarkdown(os.Stdout, resp, *topN*5)
+			return nil
+		}
+		resp := &analysis.TransitionsResponse{}
+		if err := json.Unmarshal(body, resp); err != nil {
+			return err
+		}
+		analysis.RenderTransitionsMarkdown(os.Stdout, resp)
+		return nil
+
+	case "session":
+		if len(args) < 2 {
+			return fmt.Errorf("groupId とセッションの ID を指定してください")
+		}
+		body, err := c.GetQuery("/api/analysis/"+args[0]+"/sessions/"+args[1], nil)
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			fmt.Println(string(body))
+			return nil
+		}
+		resp := &analysis.SessionDetail{}
+		if err := json.Unmarshal(body, resp); err != nil {
+			return err
+		}
+		analysis.RenderSessionMarkdown(os.Stdout, resp)
 		return nil
 
 	case "analyze-diff":

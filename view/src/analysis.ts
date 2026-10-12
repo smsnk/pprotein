@@ -237,3 +237,75 @@ export function change(
 export function shortHash(c?: Commit): string {
   return c ? c.Hash.substring(0, 7) : "";
 }
+
+// --- セッションの導線（/api/analysis/:id/sessions, /transitions） ---
+
+export interface SessionSummary {
+  ID: string;
+  Hosts?: string[];
+  StartSec: number;
+  EndSec: number;
+  Requests: number;
+  Errors: number;
+  S499: number;
+  MaxReqSec: number;
+  Lifecycles: { Name: string; Reached: number; LastStep?: string }[] | null;
+}
+
+export interface SessionsResponse {
+  GroupId: string;
+  Lifecycles: { Name: string; Steps: string[] }[] | null;
+  Total: number;
+  Sessions: SessionSummary[];
+}
+
+export interface SessionRequest {
+  OffsetSec: number;
+  Method: string;
+  Endpoint: string;
+  URI: string;
+  Host?: string;
+  Status: number;
+  ReqTimeSec: number;
+  Steps?: string[];
+}
+
+export interface SessionDetail {
+  GroupId: string;
+  Summary: SessionSummary;
+  Requests: SessionRequest[];
+}
+
+export interface TransitionsResponse {
+  GroupId: string;
+  Lifecycle?: string;
+  Sessions: number;
+  Transitions: {
+    From: string;
+    To: string;
+    Count: number;
+    ShareOfFrom: number;
+    GapP50Sec: number;
+  }[];
+}
+
+// statusColor はステータスの色（2xx 青 / 3xx 灰 / 4xx 橙 / 499 紫 / 5xx 赤）。
+export function statusColor(status: number): string {
+  if (status === 499) return "#8e44ad";
+  if (status >= 500) return "#c0392b";
+  if (status >= 400) return "#e67e22";
+  if (status >= 300) return "#7f8c8d";
+  return "#2c6fbb";
+}
+
+// prettyEndpoint は alp.yml の matching_groups（正規表現）を読みやすいパスに直す。
+// 例: "GET ^/api/livestream/[0-9]+/livecomment$" → "GET /api/livestream/:id/livecomment"
+export function prettyEndpoint(s: string): string {
+  // 文字クラスを先に置き換える（先にアンカーの ^ を消すと [^/]+ の ^ まで消える）
+  return s
+    .replace(/\[0-9\]\+/g, ":id")
+    .replace(/\[\^\/\]\+/g, ":name")
+    .replace(/\[[^\]]*\][+*]/g, ":x")
+    .replace(/\.\+/g, ":x")
+    .replace(/\^|\$/g, "");
+}
