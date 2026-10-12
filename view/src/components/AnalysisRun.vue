@@ -9,6 +9,11 @@
 
     <template v-if="rep">
       <h2>{{ rep.GroupId }}</h2>
+      <p>
+        <router-link :to="`/analysis/${gid}/sessions/`"
+          >セッションの導線を見る →</router-link
+        >
+      </p>
       <div class="detail">
         <span v-if="rep.Score" :class="rep.Score.Passed ? 'pass' : 'fail'">
           score {{ rep.Score.Value.toLocaleString()
@@ -40,7 +45,15 @@
       </div>
 
       <template v-for="l in rep.Lifecycles || []" :key="l.Name">
-        <h3>ライフサイクル: {{ l.Name }}（{{ l.Entities }} エンティティ）</h3>
+        <h3>
+          ライフサイクル: {{ l.Name }}（{{ l.Entities }} エンティティ）
+          <router-link
+            class="sub-link"
+            :to="`/analysis/${gid}/sessions/?lifecycle=${l.Name}`"
+          >
+            このライフサイクルのセッション →
+          </router-link>
+        </h3>
         <p v-if="l.Error" class="error">{{ l.Error }}</p>
         <Funnel v-else :steps="l.Steps" :names="l.Steps.map((s) => s.Name)" />
       </template>
@@ -90,6 +103,7 @@ import {
   getJSON,
   pct,
   shortHash,
+  prettyEndpoint,
 } from "../analysis";
 
 const TOP_ENDPOINTS = 6;
@@ -181,7 +195,7 @@ export default defineComponent({
         unit: "",
         series: (tl.Endpoints || [])
           .slice(0, TOP_ENDPOINTS)
-          .map((e) => ({ name: e.Name, values: e.Values })),
+          .map((e) => ({ name: prettyEndpoint(e.Name), values: e.Values })),
       });
       for (const role of ROLES.filter((r) => r !== "score")) {
         const names = stats.filter((s) => s.Role === role).map((s) => s.Name);
@@ -251,5 +265,11 @@ h2 {
 
 .share-cell {
   white-space: nowrap;
+}
+
+.sub-link {
+  margin-left: 1em;
+  font-size: 0.8em;
+  font-weight: normal;
 }
 </style>

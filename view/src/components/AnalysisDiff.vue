@@ -106,7 +106,7 @@
             </thead>
             <tbody>
               <tr v-for="e in d.Endpoints || []" :key="e.Key">
-                <td class="key">{{ e.Key }}</td>
+                <td class="key">{{ prettyEndpoint(e.Key) }}</td>
                 <td class="n">{{ e.CountBefore }} → {{ e.CountAfter }}</td>
                 <td class="n">
                   {{ pct(e.ShareBefore) }} → {{ pct(e.ShareAfter) }}
@@ -184,7 +184,15 @@
 <script lang="ts">
 import { defineComponent } from "vue";
 import Funnel from "./Funnel.vue";
-import { Diff, change, getJSON, num, pct, sec } from "../analysis";
+import {
+  Diff,
+  change,
+  getJSON,
+  num,
+  pct,
+  sec,
+  prettyEndpoint,
+} from "../analysis";
 
 // エラー・遅延の指標は減るほど良い
 const LOWER_IS_BETTER = new Set(["4xx", "5xx", "499", "p50", "p99"]);
@@ -224,6 +232,7 @@ export default defineComponent({
     await this.load();
   },
   methods: {
+    prettyEndpoint,
     num,
     pct,
     sec,

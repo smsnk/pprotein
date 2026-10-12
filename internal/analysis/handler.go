@@ -23,7 +23,9 @@ var defaultConfig []byte
 type Handler struct {
 	client *summary.Client
 	config *persistent.Handler
-	cache  *reportCache
+	cache  *memo[*Report]
+	// sessions はセッションの導線（sessions.go）の集計結果
+	sessions *memo[*sessionIndex]
 }
 
 func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
@@ -31,7 +33,7 @@ func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
-	return &Handler{client: summary.NewClient(selfURL), config: config, cache: newReportCache()}, nil
+	return &Handler{client: summary.NewClient(selfURL), config: config, cache: newMemo[*Report](), sessions: newMemo[*sessionIndex]()}, nil
 }
 
 func sanitize(raw []byte) ([]byte, error) {
@@ -47,6 +49,9 @@ func (h *Handler) RegisterHandlers(g *echo.Group) {
 	g.GET("", h.getRuns)
 	g.GET("/diff", h.getDiff)
 	g.GET("/:id", h.get)
+	g.GET("/:id/sessions", h.getSessions)
+	g.GET("/:id/sessions/:sid", h.getSession)
+	g.GET("/:id/transitions", h.getTransitions)
 }
 
 func (h *Handler) loadConfig() (*Config, []byte, error) {
