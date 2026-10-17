@@ -80,6 +80,7 @@ Markdown は人が端末で読むためのもの。エージェントやスク�
 - `Commit` はアプリのコミット（httplog に記録されたもの）、`ConfigHash` は集計に使った設定のハッシュ
 
 走行の要約はサーバー側でキャッシュする（材料と設定が変わらなければ集計し直さない）。
+キャッシュは直近 30 走行ぶんまでで、古いものから捨てる（本番の大きな httplog で observer のメモリが尽きないように）。
 収集中のエントリがある走行はキャッシュせず、`Warnings` に理由が入る。
 
 ## 走行を比べる（analyze-diff）
@@ -143,6 +144,13 @@ queries:
       SELECT created_at AS t, tip AS value
       FROM livecomments WHERE tip > 0 AND created_at > {{since}}
 ```
+
+**競技の DB に流すので、壊さないための制限がある。**
+
+- `SELECT` / `WITH` で始まる SQL 以外は、設定の保存時に拒否する（読み取り専用トランザクションでも `DROP` などの DDL は暗黙のコミットで通ってしまうため）
+- 読み取り専用トランザクション（`START TRANSACTION READ ONLY`）で実行する
+- `timeout`（既定 30s）は1本あたりの上限。MySQL 側にも `max_execution_time` として渡すので、時間切れのクエリは MySQL の中でも止まる
+- `total_timeout`（既定 60s）は全体の上限。超えた分は流さず、結果に理由を残す（走行の合間に流すので、長引くと次の走行を待たせる）
 
 `{{since}}` / `{{until}}` は unix 秒に置換される（既定は GroupId の時刻〜実行時刻）。
 **初期データの時刻が initialize の時刻で入る回がある**（ISUCON13 は `UNIX_TIMESTAMP()`）ので、
