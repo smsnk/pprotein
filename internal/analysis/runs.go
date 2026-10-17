@@ -82,10 +82,15 @@ type (
 	// memo は集計結果を覚えておく。生ログを読み直すのが重いので、
 	// 同じ材料・同じ設定なら使い回す。材料が確定していない（収集中の）走行は覚えない。
 	memo[T any] struct {
-		mu   sync.Mutex
-		data map[string]T
+		mu    sync.Mutex
+		data  map[string]T
+		order []string // 入れた順。上限を超えたら古いものから捨てる
 	}
 )
+
+// memoLimit はキャッシュに置く走行の数。本番の httplog は素振りより桁違いに大きく、
+// 上限が無いと競技の途中で observer のメモリが尽きて pprotein が落ちる。
+const memoLimit = 30
 
 // compactJSON はインデントせずに返す。echo の c.JSON は Debug 時にインデントし、
 // AI が読むときのトークンが倍以上になる（ISUCON13 の1走行で 18KB → 7.5KB）。
@@ -111,7 +116,14 @@ func (c *memo[T]) get(key string) (T, bool) {
 func (c *memo[T]) put(key string, r T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, ok := c.data[key]; !ok {
+		c.order = append(c.order, key)
+	}
 	c.data[key] = r
+	for len(c.order) > memoLimit {
+		delete(c.data, c.order[0])
+		c.order = c.order[1:]
+	}
 }
 
 // entryIndex は収集タイプをまたいだエントリを GroupId ごとにまとめる。

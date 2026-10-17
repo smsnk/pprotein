@@ -27,9 +27,12 @@ type (
 	Config struct {
 		// DSN は go-sql-driver/mysql の形式。observer からはトンネル越しに繋ぐ。
 		DSN string `yaml:"dsn"`
-		// Timeout は1クエリあたりの上限。既定 30s。
-		Timeout string  `yaml:"timeout,omitempty"`
-		Queries []Query `yaml:"queries"`
+		// Timeout は1クエリあたりの上限。既定 30s。MySQL 側にも max_execution_time として渡す。
+		Timeout string `yaml:"timeout,omitempty"`
+		// TotalTimeout は全クエリを合わせた上限。既定 60s。超えた分は流さない。
+		// 走行の合間に流すので、長引くと次の走行（ベンチの待ち行列）を待たせる。
+		TotalTimeout string  `yaml:"total_timeout,omitempty"`
+		Queries      []Query `yaml:"queries"`
 	}
 
 	// Query は1本の SQL。SQL 中の {{since}} / {{until}} は走行区間の unix 秒に置換される。
@@ -69,6 +72,9 @@ func ParseConfig(raw []byte) (*Config, error) {
 		if q.Name == "" || q.SQL == "" {
 			return nil, fmt.Errorf("query needs both name and sql: %+v", q)
 		}
+		if !isReadOnlySQL(q.SQL) {
+			return nil, fmt.Errorf("query %s: only SELECT / WITH is allowed (dbquery runs against the contest DB)", q.Name)
+		}
 		if seen[q.Name] {
 			return nil, fmt.Errorf("duplicate query name: %s", q.Name)
 		}
@@ -82,6 +88,42 @@ func (c *Config) timeout() time.Duration {
 		return d
 	}
 	return 30 * time.Second
+}
+
+// clientGrace はクライアント側で MySQL 側の上限より余分に待つ時間。
+const clientGrace = 2 * time.Second
+
+func (c *Config) totalTimeout() time.Duration {
+	if d, err := time.ParseDuration(c.TotalTimeout); err == nil && d > 0 {
+		return d
+	}
+	return 60 * time.Second
+}
+
+// isReadOnlySQL は先頭のコメントと空白を除いて SELECT か WITH で始まるかを見る。
+// 競技の DB に流すので、書き込みと DDL は設定の時点で拒否する
+// （読み取り専用トランザクションでも DDL は暗黙のコミットで通ってしまうため）。
+func isReadOnlySQL(q string) bool {
+	s := strings.TrimSpace(q)
+	for {
+		switch {
+		case strings.HasPrefix(s, "--") || strings.HasPrefix(s, "#"):
+			if i := strings.IndexByte(s, '\n'); i >= 0 {
+				s = strings.TrimSpace(s[i+1:])
+				continue
+			}
+			return false
+		case strings.HasPrefix(s, "/*"):
+			if i := strings.Index(s, "*/"); i >= 0 {
+				s = strings.TrimSpace(s[i+2:])
+				continue
+			}
+			return false
+		}
+		break
+	}
+	head := strings.ToUpper(s)
+	return strings.HasPrefix(head, "SELECT") || strings.HasPrefix(head, "WITH")
 }
 
 // HashConfig は設定ファイルの中身を短いハッシュにする（SHA-256 の先頭12桁）。
@@ -117,15 +159,44 @@ func Run(cfg *Config, since, until int64) (*Result, error) {
 		return nil, fmt.Errorf("failed to connect db: %w", err)
 	}
 
+	// 1本の接続で、MySQL 側の実行時間の上限と読み取り専用トランザクションをかける。
+	// クライアント側の context が切れても MySQL はクエリを続けるので、サーバー側でも止める。
+	ctx, cancel = context.WithTimeout(context.Background(), cfg.totalTimeout())
+	defer cancel()
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get connection: %w", err)
+	}
+	defer conn.Close()
+	ms := cfg.timeout().Milliseconds()
+	if _, err := conn.ExecContext(ctx, fmt.Sprintf("SET SESSION max_execution_time = %d", ms)); err != nil {
+		// MariaDB は max_statement_time（秒）
+		_, _ = conn.ExecContext(ctx, fmt.Sprintf("SET SESSION max_statement_time = %d", (ms+999)/1000))
+	}
+	tx, err := conn.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("failed to begin read-only transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	deadline, _ := ctx.Deadline()
 	res := &Result{Since: since, Until: until}
 	for _, q := range cfg.Queries {
-		res.Queries = append(res.Queries, runOne(db, cfg.timeout(), q, since, until))
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			res.Queries = append(res.Queries, QueryResult{Name: q.Name, Error: fmt.Sprintf("skipped: total_timeout (%s) exceeded", cfg.totalTimeout())})
+			continue
+		}
+		// クライアント側は MySQL 側の上限（max_execution_time）より少し長く待つ。
+		// 先にクライアントが切ると接続ごと閉じられ、以降のクエリが全部 bad connection になる
+		res.Queries = append(res.Queries, runOne(tx, min(cfg.timeout()+clientGrace, remaining), q, since, until))
 	}
 	return res, nil
 }
 
-func runOne(db *sql.DB, timeout time.Duration, q Query, since, until int64) QueryResult {
-	r := QueryResult{Name: q.Name}
+func runOne(db *sql.Tx, timeout time.Duration, q Query, since, until int64) (r QueryResult) {
+	// 名前付きの戻り値にして、defer で書いた Elapsed が呼び出し側に届くようにする
+	r.Name = q.Name
 	start := time.Now()
 	defer func() { r.Elapsed = time.Since(start).Seconds() }()
 

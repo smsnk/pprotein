@@ -1,6 +1,9 @@
 # 走行直後に流す SQL。POST /api/dbquery {"GroupId": "..."} で実行される。
 # {{since}} / {{until}} は走行区間の unix 秒（既定は GroupId の時刻〜実行時刻）に置換される。
 # 列名の約束は analysis.yml 側で決める（時系列なら t と value、内訳なら key と value など）。
+# 競技の DB に流すので、SELECT / WITH 以外は保存できない。読み取り専用トランザクションで実行する。
+# timeout は1本あたりの上限（MySQL 側にも max_execution_time で渡す）、total_timeout は全体の上限。
 dsn: isucon:isucon@tcp(127.0.0.1:9012)/isucon
 timeout: 30s
+total_timeout: 60s
 queries: []

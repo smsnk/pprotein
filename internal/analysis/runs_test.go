@@ -3,6 +3,7 @@ package analysis
 import (
 	"bytes"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -109,5 +110,26 @@ func TestTimelineJSONIsColumnarAndRoundTrips(t *testing.T) {
 	RenderMarkdown(&b, back)
 	if a.String() != b.String() {
 		t.Errorf("round trip changed markdown:\n%s\n---\n%s", a.String(), b.String())
+	}
+}
+
+func TestMemoEvictsOldest(t *testing.T) {
+	m := newMemo[int]()
+	for i := 0; i < memoLimit+5; i++ {
+		m.put(strconv.Itoa(i), i)
+	}
+	if _, ok := m.get("0"); ok {
+		t.Error("the oldest entry must be evicted")
+	}
+	if v, ok := m.get(strconv.Itoa(memoLimit + 4)); !ok || v != memoLimit+4 {
+		t.Error("the newest entry must be kept")
+	}
+	if len(m.data) != memoLimit || len(m.order) != memoLimit {
+		t.Errorf("size = %d / %d", len(m.data), len(m.order))
+	}
+	// 同じキーを入れ直しても数は増えない
+	m.put(strconv.Itoa(memoLimit+4), 0)
+	if len(m.order) != memoLimit {
+		t.Errorf("re-put grew the order: %d", len(m.order))
 	}
 }
