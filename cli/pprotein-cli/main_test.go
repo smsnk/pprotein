@@ -108,19 +108,24 @@ func run(t *testing.T, f *fakeAPI, args ...string) (stdout, stderr string, err e
 	return out.String(), errOut.String(), err
 }
 
-// latest は全部が失敗した収集を飛ばし、飛ばしたことを stderr に書く。古い名前でも動き、新しい名前を案内する
-func TestLatestAliasSkipsFailedGroup(t *testing.T) {
+// latest は全部が失敗した収集も指し、失敗を警告に出す（新しい走行の失敗を前の走行の結果で隠さない）。
+// 古い名前でも動き、新しい名前を案内する
+func TestLatestIncludesFailedGroup(t *testing.T) {
 	out, stderr, err := run(t, newFake(), "latest")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// summary に節の無い ptqd の失敗は警告しない
-	if !strings.HasPrefix(out, "# summary "+older) || strings.Contains(out, "ptqd") {
+	if !strings.HasPrefix(out, "# summary "+newer) || !strings.Contains(out, "httplog isu1 は収集に失敗した") {
 		t.Errorf("stdout:\n%s", out)
 	}
-	if !strings.Contains(stderr, "`pprotein-cli summary` を使ってください") ||
-		!strings.Contains(stderr, "latest: "+newer+" は全部の収集に失敗したので、"+older+" を使います") {
+	if !strings.Contains(stderr, "`pprotein-cli summary` を使ってください") {
 		t.Errorf("stderr:\n%s", stderr)
+	}
+
+	// summary に節の無い ptqd の失敗は警告しない
+	out, _, err = run(t, newFake(), "summary", older)
+	if err != nil || strings.Contains(out, "ptqd") {
+		t.Errorf("err = %v, stdout:\n%s", err, out)
 	}
 }
 
@@ -132,7 +137,8 @@ func TestDiffDefaultsAfterToLatest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, "# summary diff "+older+" -> "+older) || strings.Contains(out, "中身を読めなかった") {
+	if !strings.HasPrefix(out, "# summary diff "+older+" -> "+newer) || !strings.Contains(out, "after: httplog isu1 は収集に失敗した") ||
+		strings.Contains(out, "中身を読めなかった") {
 		t.Errorf("stdout:\n%s", out)
 	}
 }
@@ -164,7 +170,7 @@ func TestOldNamesAreHiddenAliases(t *testing.T) {
 // endpoints も収集中・失敗の警告を出し、JSON は収集の素性を持つ
 func TestEndpointsKeepWarnings(t *testing.T) {
 	f := newFake()
-	f.bodies["/api/analysis/"+older] = `{"GroupId":"` + older + `","Warnings":["httplog isu2 は収集中（pending）"],"EndpointStats":[{"Key":"GET /api/a","Count":2}]}`
+	f.bodies["/api/analysis/"+newer] = `{"GroupId":"` + newer + `","Warnings":["httplog isu2 は収集中（pending）"],"EndpointStats":[{"Key":"GET /api/a","Count":2}]}`
 	out, _, err := run(t, f, "analyze", "endpoints")
 	if err != nil {
 		t.Fatal(err)
@@ -176,20 +182,20 @@ func TestEndpointsKeepWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, `{"GroupId":"`+older+`","Warnings":["httplog isu2`) {
+	if !strings.HasPrefix(out, `{"GroupId":"`+newer+`","Warnings":["httplog isu2`) {
 		t.Errorf("stdout:\n%s", out)
 	}
 }
 
-// analyze も CLI 側で latest を解決する（サーバーの latest とは意味が違う）
+// analyze も CLI 側で latest を解決する
 func TestAnalyzeResolvesLatestOnCLI(t *testing.T) {
 	f := newFake()
-	f.bodies["/api/analysis/"+older] = `{"GroupId":"` + older + `","Origin":"2025-11-23T10:21:33Z","BucketSec":5}`
+	f.bodies["/api/analysis/"+newer] = `{"GroupId":"` + newer + `","Origin":"2025-11-23T10:41:02Z","BucketSec":5}`
 	out, _, err := run(t, f, "analyze")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(out, "# analyze "+older) {
+	if !strings.HasPrefix(out, "# analyze "+newer) {
 		t.Errorf("stdout:\n%s", out)
 	}
 }

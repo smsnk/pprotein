@@ -14,15 +14,15 @@ func entry(group, status string) Entry {
 	return e
 }
 
-// 収集中の走行は latest に含め、全部が失敗した走行は飛ばす
+// 収集中の走行も、全部が失敗した走行も latest に含める
 func TestLatest(t *testing.T) {
 	id, err := Latest([]Entry{
 		entry("2026-10-11_16-41-34.230854", "ok"),
 		entry("2026-10-11_17-02-15.633789", "pending"),
-		entry("2026-10-11_17-02-15.633789", "fail"),
 		entry("2026-10-11_17-30-00.000000", "fail"),
+		entry("test", "ok"), // 手で送ったスコアなど。文字列では時刻より後ろに並ぶ
 	})
-	if err != nil || id != "2026-10-11_17-02-15.633789" {
+	if err != nil || id != "2026-10-11_17-30-00.000000" {
 		t.Errorf("latest = %q, %v", id, err)
 	}
 	if _, err := Latest(nil); err == nil {

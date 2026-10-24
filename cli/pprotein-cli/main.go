@@ -52,7 +52,7 @@ func newRootCmd() *cobra.Command {
   analyze  得点がいつどこで生まれ、利用者がどこまで進んだか（httplog の生ログと dbquery）
 
 GROUP は収集の GroupId（2026-10-17_10-41-02.984213 の形）。省略すると latest で、
-収集中のものも含め、全部が失敗した収集を除いた最新の収集を指す（飛ばした収集は stderr に書く）。`,
+収集中・失敗したものも含めた最新の収集を指す。`,
 		SilenceUsage:      true,
 		SilenceErrors:     true,
 		DisableAutoGenTag: true,
@@ -139,8 +139,7 @@ func groupArg(args []string) string {
 }
 
 // resolve は latest を実際の GroupId にする。
-// 全部が失敗した新しい収集を飛ばしたときは、取り違えに気づけるように stderr に書く。
-func resolve(cmd *cobra.Command, c *client.Client, id string) (string, error) {
+func resolve(c *client.Client, id string) (string, error) {
 	if id != "latest" {
 		return id, nil
 	}
@@ -150,10 +149,7 @@ func resolve(cmd *cobra.Command, c *client.Client, id string) (string, error) {
 	}
 	latest, err := client.Latest(entries)
 	if err != nil {
-		return "", err
-	}
-	if newest := client.GroupIDs(entries)[0]; newest != latest {
-		fmt.Fprintf(cmd.ErrOrStderr(), "latest: %s は全部の収集に失敗したので、%s を使います\n", newest, latest)
+		return "", fmt.Errorf("%w（まず pprotein-cli collect を実行してください）", err)
 	}
 	return latest, nil
 }

@@ -105,17 +105,19 @@ func TestLoadIgnoresDBQueryFailureRetried(t *testing.T) {
 	}
 }
 
-func TestLatestGroupIncludesPending(t *testing.T) {
+// /api/analysis/latest も CLI と同じく、収集中・失敗した収集を含め、どの収集タイプでも最新を指す
+func TestLatestGroupIsNewest(t *testing.T) {
 	api := fakeAPI(t,
 		[]client.Entry{
 			entry("h0", "2026-10-11_16-41-34.230854", "isu1", "ok", "Ready"),
 			entry("h1", group, "isu1", "pending", "Collecting"),
 			entry("h2", "2026-10-11_17-30-00.000000", "isu1", "fail", "error"),
 		},
-		nil, nil,
+		[]client.Entry{entry("d1", "2026-10-11_17-45-00.000000", "", "ok", "Ready")}, // httplog の無い新しい収集
+		nil,
 	)
 	id, err := LatestGroup(api)
-	if err != nil || id != group {
+	if err != nil || id != "2026-10-11_17-45-00.000000" {
 		t.Errorf("latest = %q, %v", id, err)
 	}
 }

@@ -68,7 +68,7 @@ func (h *Handler) loadConfig() (*Config, []byte, error) {
 	return cfg, raw, nil
 }
 
-// get は GET /api/analysis/:id。id に latest を渡すと httplog がある最新の収集を使う。
+// get は GET /api/analysis/:id。id に latest を渡すと最新の収集を使う（LatestGroup）。
 func (h *Handler) get(c echo.Context) error {
 	cfg, raw, err := h.loadConfig()
 	if err != nil {
@@ -94,18 +94,13 @@ func (h *Handler) get(c echo.Context) error {
 	return compactJSON(c, rep)
 }
 
-// LatestGroup は httplog がある最新の収集グループを返す。
-// 収集中（pending）のものも含める。走行直後に latest を引いて1つ前の走行が出ると、取り違えに気づけない。
+// LatestGroup は最新の収集グループを返す（client.Latest。pprotein-cli の latest と同じ）。
 func LatestGroup(api *client.Client) (string, error) {
-	entries, err := api.Entries("httplog")
+	entries, err := api.AllEntries()
 	if err != nil {
 		return "", err
 	}
-	id, err := client.Latest(entries)
-	if err != nil {
-		return "", fmt.Errorf("no httplog is collected")
-	}
-	return id, nil
+	return client.Latest(entries)
 }
 
 // Load は収集グループの httplog（生ログ）と dbquery の結果を集める。

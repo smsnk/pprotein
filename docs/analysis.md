@@ -199,5 +199,6 @@ lifecycles:
   収集中・失敗したエントリは集計に含めず、「httplog isu1 は収集中（pending）」のように警告に出す。
   警告が出ていたら、ライフサイクルの 0 件やリクエスト数の 0 は実際の値ではない。完了を待ってから読み直す。
   `pprotein-cli analyze --wait [groupId]` は、その収集の httplog / dbquery / score に pending が無くなるまで待ってから出す（上限は `--timeout`）
-- `latest` は収集中のものも含めて最新の収集を指す（走行直後に1つ前の走行と取り違えないため）。
-  API（`/api/analysis/latest`）は httplog のある収集から、CLI はどの収集タイプでも（全部が失敗した収集は除いて）選ぶ
+- `latest` は収集中・失敗したものも含めて最新の収集を指す（走行直後に1つ前の走行と取り違えないため）。
+  API（`/api/analysis/latest`）と pprotein-cli で同じ。走行の推移（`analyze trend`、`GET /api/analysis`）は、
+  httplog が全部失敗した走行を含めない（計測値が無く、グラフに 0 を描いてしまうため）

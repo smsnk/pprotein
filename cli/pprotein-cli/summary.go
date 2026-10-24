@@ -23,7 +23,7 @@ func newSummaryCmd(o *options) *cobra.Command {
 		SuggestionsMinimumDistance: 2,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := o.client()
-			id, err := resolve(cmd, c, groupArg(args))
+			id, err := resolve(c, groupArg(args))
 			if err != nil {
 				return err
 			}
@@ -58,7 +58,7 @@ func newSummaryDiffCmd(o *options) *cobra.Command {
 			c := o.client()
 			groups := [2]*summary.Group{}
 			for i, arg := range []string{args[0], groupArg(args[1:])} {
-				id, err := resolve(cmd, c, arg)
+				id, err := resolve(c, arg)
 				if err != nil {
 					return err
 				}

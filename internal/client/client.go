@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/smsnk/pprotein/internal/dbquery"
 	"github.com/smsnk/pprotein/internal/git"
 	"github.com/smsnk/pprotein/internal/md"
 	"github.com/smsnk/pprotein/internal/score"
@@ -161,20 +162,16 @@ func (c *Client) AllEntries() ([]Entry, error) {
 	return all, nil
 }
 
-// Latest は最新の収集の GroupId を返す。収集中のものは含め、全部が失敗した収集は除く。
-// 走行直後に1つ前の走行を指すと、取り違えに気づけない。
+// Latest は最新の収集の GroupId を返す。収集中・失敗したものも含める。
+// 1つ前の走行を指すと、走行直後の収集中や新しい走行の失敗が前の走行の結果で隠れ、取り違えに気づけない。
+// GroupId の形でないもの（API に手で送ったスコアやメモ）は時刻の順に並ばないので除く。
 func Latest(entries []Entry) (string, error) {
-	live := []Entry{}
-	for _, e := range entries {
-		if e.Status != "fail" {
-			live = append(live, e)
+	for _, id := range GroupIDs(entries) {
+		if _, err := time.Parse(dbquery.GroupIdLayout, id); err == nil {
+			return id, nil
 		}
 	}
-	ids := GroupIDs(live)
-	if len(ids) == 0 {
-		return "", fmt.Errorf("収集がありません（まず pprotein-cli collect を実行してください）")
-	}
-	return ids[0], nil
+	return "", errors.New("収集がありません")
 }
 
 // Newest は収集 groupId の typ のエントリのうち、確定した（ok の）いちばん新しいものを返す。無ければ nil。

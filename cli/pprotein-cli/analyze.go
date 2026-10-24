@@ -24,7 +24,7 @@ func newAnalyzeCmd(o *options) *cobra.Command {
 		SuggestionsMinimumDistance: 2,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := o.client()
-			id, err := resolve(cmd, c, groupArg(args))
+			id, err := resolve(c, groupArg(args))
 			if err != nil {
 				return err
 			}
@@ -72,7 +72,7 @@ func newAnalyzeDiffCmd(o *options) *cobra.Command {
 			c := o.client()
 			reps := [2]*analysis.Report{}
 			for i, arg := range []string{args[0], groupArg(args[1:])} {
-				id, err := resolve(cmd, c, arg)
+				id, err := resolve(c, arg)
 				if err != nil {
 					return err
 				}
@@ -113,7 +113,7 @@ func newEndpointsCmd(o *options) *cobra.Command {
 		Args:  groupArgs(1, cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := o.client()
-			id, err := resolve(cmd, c, groupArg(args))
+			id, err := resolve(c, groupArg(args))
 			if err != nil {
 				return err
 			}
@@ -140,7 +140,7 @@ func newSessionsCmd(o *options) *cobra.Command {
 		Args:  groupArgs(1, cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := o.client()
-			id, err := resolve(cmd, c, groupArg(args))
+			id, err := resolve(c, groupArg(args))
 			if err != nil {
 				return err
 			}
@@ -168,7 +168,7 @@ func newSessionCmd(o *options) *cobra.Command {
 		Args:  groupArgs(1, cobra.ExactArgs(2)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := o.client()
-			id, err := resolve(cmd, c, args[0])
+			id, err := resolve(c, args[0])
 			if err != nil {
 				return err
 			}
@@ -190,7 +190,7 @@ func newTransitionsCmd(o *options) *cobra.Command {
 		Args:  groupArgs(1, cobra.MaximumNArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c := o.client()
-			id, err := resolve(cmd, c, groupArg(args))
+			id, err := resolve(c, groupArg(args))
 			if err != nil {
 				return err
 			}
