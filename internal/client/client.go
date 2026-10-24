@@ -146,6 +146,26 @@ func (c *Client) AllEntries() ([]Entry, error) {
 	return all, nil
 }
 
+// Warning は確定していない（収集中・失敗の）エントリを警告文にする。確定していれば空。
+// 黙って飛ばすと、収集中の走行がリクエスト 0 件として読まれてしまう。
+func Warning(e Entry) string {
+	switch e.Status {
+	case "pending":
+		return e.Name() + " は収集中（pending）。この集計に含めていない。完了してから再実行する"
+	case "fail":
+		return fmt.Sprintf("%s は収集に失敗した（%s）。この集計に含めていない", e.Name(), e.Message)
+	}
+	return ""
+}
+
+// Name は警告などに出すエントリの名前（「httplog isu1」）。
+func (e Entry) Name() string {
+	if e.Snapshot.Label == "" {
+		return e.Snapshot.Type
+	}
+	return e.Snapshot.Type + " " + e.Snapshot.Label
+}
+
 // GroupIDs は新しい順の GroupId 一覧を返す。
 func GroupIDs(entries []Entry) []string {
 	seen := map[string]bool{}

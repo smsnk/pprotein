@@ -106,6 +106,14 @@ func (h *Handler) getTrend(c echo.Context) error {
 	// グラフは古い順に並べる
 	sort.Sort(sort.StringSlice(ids))
 
+	// コミットのメッセージは全文を返す（summary.Group は1行目しか持たない）
+	messages := map[string]string{}
+	for _, e := range entries {
+		if r := e.Snapshot.Repository; r != nil {
+			messages[r.Hash] = r.Message
+		}
+	}
+
 	resp := &Response{Groups: make([]Point, 0, len(ids))}
 	for _, id := range ids {
 		// topN で切り詰める前の全件を読む。Metrics（総数・合計）を
@@ -115,29 +123,29 @@ func (h *Handler) getTrend(c echo.Context) error {
 		if err != nil {
 			continue // 収集中 / 壊れている group は飛ばす
 		}
-		resp.Groups = append(resp.Groups, buildPoint(g, topN))
+		p := buildPoint(g, topN)
+		if p.Commit != nil {
+			p.Commit.Message = messages[p.Commit.Hash]
+		}
+		resp.Groups = append(resp.Groups, p)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
 
 func buildPoint(g *summary.Group, topN int) Point {
 	p := Point{
-		ID:      g.ID,
+		ID:      g.GroupId,
 		Metrics: map[string]float64{},
 	}
 	if !g.Datetime.IsZero() {
 		p.Datetime = g.Datetime.Format("2006-01-02 15:04:05")
 	}
-	if g.Repository != nil && g.Repository.Hash != "" {
-		p.Commit = &Commit{
-			Hash:    g.Repository.Hash,
-			Message: g.Repository.Message,
-			Ref:     g.Repository.Ref,
-		}
+	if c := g.Commit; c != nil {
+		p.Commit = &Commit{Hash: c.Hash, Message: c.Message, Ref: c.Ref}
 	}
 	if g.Score != nil {
-		p.Score = &Score{Value: g.Score.Score, Passed: g.Score.Passed}
-		p.Metrics[MetricScoreValue] = float64(g.Score.Score)
+		p.Score = &Score{Value: g.Score.Value, Passed: g.Score.Passed}
+		p.Metrics[MetricScoreValue] = float64(g.Score.Value)
 	}
 
 	// httplog: 合計レスポンスタイムとリクエスト総数。

@@ -29,6 +29,13 @@ func fakeAPI(t *testing.T, httplogs, dbqueries []client.Entry, bodies map[string
 			t.Error(err)
 		}
 	}
+	// 本物の API と同じく、一覧のエントリには収集タイプが入っている
+	for i := range httplogs {
+		httplogs[i].Snapshot.Type = "httplog"
+	}
+	for i := range dbqueries {
+		dbqueries[i].Snapshot.Type = "dbquery"
+	}
 	mux.HandleFunc("/api/httplog", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, httplogs) })
 	mux.HandleFunc("/api/dbquery", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, dbqueries) })
 	mux.HandleFunc("/api/httplog/config", func(w http.ResponseWriter, r *http.Request) {})

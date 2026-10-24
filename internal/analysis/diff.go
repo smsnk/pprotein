@@ -7,6 +7,9 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/smsnk/pprotein/internal/md"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 // 2つの走行の Report を比べる。
@@ -21,7 +24,7 @@ type (
 	Diff struct {
 		Before string
 		After  string
-		Score  *ScoreDiff `json:",omitempty"`
+		Score  *score.Diff `json:",omitempty"`
 		// Warnings は比較の前提が崩れているもの（設定の食い違い、片方の警告など）。
 		Warnings []string `json:",omitempty"`
 
@@ -30,11 +33,6 @@ type (
 		Endpoints  []EndpointDiff
 		Lifecycles []LifecycleDiff
 		Breakdowns []BreakdownDiff
-	}
-
-	ScoreDiff struct {
-		Before *ScoreInfo `json:",omitempty"`
-		After  *ScoreInfo `json:",omitempty"`
 	}
 
 	// SeriesDiff は系列1本。片方にしか無い系列は Before / After の片方が nil。
@@ -106,7 +104,7 @@ func Compare(before, after *Report, top int) *Diff {
 	}
 	d := &Diff{Before: before.GroupId, After: after.GroupId}
 	if before.Score != nil || after.Score != nil {
-		d.Score = &ScoreDiff{Before: before.Score, After: after.Score}
+		d.Score = &score.Diff{Before: before.Score, After: after.Score}
 	}
 
 	if a, b := before.ConfigHash.Analysis, after.ConfigHash.Analysis; a != b {
@@ -377,22 +375,20 @@ func compareBreakdowns(before, after []BreakdownResult) []BreakdownDiff {
 
 // RenderDiffMarkdown は Diff を Markdown にする。
 func RenderDiffMarkdown(w io.Writer, d *Diff) {
-	fmt.Fprintf(w, "# analyze-diff %s -> %s\n\n", d.Before, d.After)
+	fmt.Fprintf(w, "# analyze diff %s -> %s\n\n", d.Before, d.After)
 	if d.Score != nil {
-		fmt.Fprintf(w, "- score: %s\n", scoreLine(d.Score))
+		fmt.Fprintf(w, "- スコア: %s\n", d.Score)
 	}
 	fmt.Fprintln(w, "- 2走行の比較なので有意差は判定しない。走行間のばらつきの実測値と比べて読む")
-	for _, warn := range d.Warnings {
-		fmt.Fprintf(w, "- **警告**: %s\n", warn)
-	}
+	md.Warnings(w, d.Warnings)
 	fmt.Fprintln(w)
 
 	fmt.Fprint(w, "## 系列（両方にあるものは変化率の大きい順）\n\n")
 	if len(d.Series) == 0 {
 		fmt.Fprint(w, "系列なし\n\n")
 	} else {
-		writeRow(w, []string{"系列", "before", "after", "差", "%", "50%到達", "90%到達"})
-		writeSep(w, 7)
+		md.Row(w, []string{"系列", "before", "after", "差", "%", "50%到達", "90%到達"})
+		md.Sep(w, 7)
 		for _, s := range d.Series {
 			name := s.Name
 			if s.Role != "" {
@@ -400,12 +396,12 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 			}
 			switch {
 			case s.Before == nil:
-				writeRow(w, []string{name, "（なし）", num(*s.After), "追加", "", "", ""})
+				md.Row(w, []string{name, "（なし）", md.Num(*s.After), "追加", "", "", ""})
 			case s.After == nil:
-				writeRow(w, []string{name, num(*s.Before), "（なし）", "削除", "", "", ""})
+				md.Row(w, []string{name, md.Num(*s.Before), "（なし）", "削除", "", "", ""})
 			default:
-				writeRow(w, []string{
-					name, num(*s.Before), num(*s.After), signed(*s.After - *s.Before), pctChange(*s.Before, *s.After),
+				md.Row(w, []string{
+					name, md.Num(*s.Before), md.Num(*s.After), md.Signed(*s.After-*s.Before, md.Num), md.Change(*s.Before, *s.After),
 					arrowSec(s.T50Before, s.T50After), arrowSec(s.T90Before, s.T90After),
 				})
 			}
@@ -414,25 +410,25 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 	}
 
 	fmt.Fprint(w, "## リクエスト\n\n")
-	writeRow(w, []string{"指標", "before", "after", "差", "%"})
-	writeSep(w, 5)
+	md.Row(w, []string{"指標", "before", "after", "差", "%"})
+	md.Sep(w, 5)
 	for _, m := range d.Requests {
-		f := num
+		f := md.Num
 		if m.Name == "p50" || m.Name == "p99" {
-			f = func(v float64) string { return fmt.Sprintf("%.3f", v) }
+			f = md.Sec
 		}
-		writeRow(w, []string{m.Name, f(m.Before), f(m.After), signedF(m.After-m.Before, f), pctChange(m.Before, m.After)})
+		md.Row(w, []string{m.Name, f(m.Before), f(m.After), md.Signed(m.After-m.Before, f), md.Change(m.Before, m.After)})
 	}
 	fmt.Fprintln(w)
 
 	if len(d.Endpoints) > 0 {
 		fmt.Fprint(w, "## エンドポイント構成比（比率の差が大きい順）\n\n")
-		writeRow(w, []string{"エンドポイント", "件数 before", "件数 after", "比率 before", "比率 after", "比率の差"})
-		writeSep(w, 6)
+		md.Row(w, []string{"エンドポイント", "件数 before", "件数 after", "比率 before", "比率 after", "比率の差"})
+		md.Sep(w, 6)
 		for _, e := range d.Endpoints {
-			writeRow(w, []string{
-				"`" + e.Key + "`", itoa(e.CountBefore), itoa(e.CountAfter),
-				pct(e.ShareBefore), pct(e.ShareAfter), fmt.Sprintf("%+.1fpt", (e.ShareAfter-e.ShareBefore)*100),
+			md.Row(w, []string{
+				"`" + e.Key + "`", md.Int(e.CountBefore), md.Int(e.CountAfter),
+				md.Pct(e.ShareBefore), md.Pct(e.ShareAfter), fmt.Sprintf("%+.1fpt", (e.ShareAfter-e.ShareBefore)*100),
 			})
 		}
 		fmt.Fprintln(w)
@@ -440,14 +436,14 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 
 	for _, l := range d.Lifecycles {
 		fmt.Fprintf(w, "## ライフサイクル: %s（エンティティ %s）\n\n", l.Name, arrowInt(l.EntitiesBefore, l.EntitiesAfter))
-		writeRow(w, []string{"状態", "到達", "到達率", "ここで止まった", "1件あたり回数", "所要 p50", "所要 p90"})
-		writeSep(w, 7)
+		md.Row(w, []string{"状態", "到達", "到達率", "ここで止まった", "1件あたり回数", "所要 p50", "所要 p90"})
+		md.Sep(w, 7)
 		for _, s := range l.Steps {
-			writeRow(w, []string{
+			md.Row(w, []string{
 				s.Name,
-				arrowStep(s, func(r *StepResult) string { return itoa(r.Reached) }),
-				arrowStep(s, func(r *StepResult) string { return pct(r.Rate) }),
-				arrowStep(s, func(r *StepResult) string { return itoa(r.StoppedHere) }),
+				arrowStep(s, func(r *StepResult) string { return md.Int(r.Reached) }),
+				arrowStep(s, func(r *StepResult) string { return md.Pct(r.Rate) }),
+				arrowStep(s, func(r *StepResult) string { return md.Int(r.StoppedHere) }),
 				arrowStep(s, func(r *StepResult) string { return fmt.Sprintf("%.1f", r.PerEntity) }),
 				arrowStep(s, func(r *StepResult) string {
 					return quantileCell(r.FromPrev, func(q *Quantiles) float64 { return q.P50 })
@@ -466,7 +462,7 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 			fmt.Fprint(w, "key / value 列が無いので行数だけ比べる\n\n")
 			continue
 		}
-		fmt.Fprintf(w, "- 上位1件の構成比 %s → %s、上位3件 %s → %s\n", pct(b.Top1Before), pct(b.Top1After), pct(b.Top3Before), pct(b.Top3After))
+		fmt.Fprintf(w, "- 上位1件の構成比 %s → %s、上位3件 %s → %s\n", md.Pct(b.Top1Before), md.Pct(b.Top1After), md.Pct(b.Top3Before), md.Pct(b.Top3After))
 		if len(b.NewInTop) > 0 {
 			fmt.Fprintf(w, "- 新たに上位に入った key: %s\n", strings.Join(b.NewInTop, ", "))
 		}
@@ -474,14 +470,14 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 		if len(b.Rows) == 0 {
 			continue
 		}
-		writeRow(w, []string{"key", "before", "after", "差"})
-		writeSep(w, 4)
+		md.Row(w, []string{"key", "before", "after", "差"})
+		md.Sep(w, 4)
 		for _, r := range b.Rows {
 			diff := ""
 			if r.Before != nil && r.After != nil {
-				diff = signed(*r.After - *r.Before)
+				diff = md.Signed(*r.After-*r.Before, md.Num)
 			}
-			writeRow(w, []string{r.Key, optNum(r.Before), optNum(r.After), diff})
+			md.Row(w, []string{r.Key, optNum(r.Before), optNum(r.After), diff})
 		}
 		fmt.Fprintln(w)
 	}
@@ -538,47 +534,7 @@ func optNum(p *float64) string {
 	if p == nil {
 		return "（上位外）"
 	}
-	return num(*p)
-}
-
-func signed(v float64) string {
-	if v > 0 {
-		return "+" + num(v)
-	}
-	return num(v)
-}
-
-func signedF(v float64, f func(float64) string) string {
-	if v > 0 {
-		return "+" + f(v)
-	}
-	return f(v)
-}
-
-func pctChange(before, after float64) string {
-	if before == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%+.1f%%", (after-before)/math.Abs(before)*100)
-}
-
-func scoreCell(v *ScoreInfo) string {
-	if v == nil {
-		return "（なし）"
-	}
-	if !v.Passed {
-		return fmt.Sprintf("%d (FAIL)", v.Value)
-	}
-	return fmt.Sprintf("%d", v.Value)
-}
-
-func scoreLine(s *ScoreDiff) string {
-	line := scoreCell(s.Before) + " -> " + scoreCell(s.After)
-	if s.Before != nil && s.After != nil {
-		b, a := float64(s.Before.Value), float64(s.After.Value)
-		line += fmt.Sprintf(" (%s, %s)", signed(a-b), pctChange(b, a))
-	}
-	return line
+	return md.Num(*p)
 }
 
 func arrowSec(b, a *int) string {
@@ -596,7 +552,7 @@ func arrowInt(b, a *int) string {
 		if p == nil {
 			return "（なし）"
 		}
-		return itoa(*p)
+		return md.Int(*p)
 	}
 	return f(b) + " → " + f(a)
 }
@@ -615,5 +571,5 @@ func quantileCell(q *Quantiles, f func(*Quantiles) float64) string {
 	if q == nil {
 		return "-"
 	}
-	return sec(f(q))
+	return md.Sec(f(q))
 }

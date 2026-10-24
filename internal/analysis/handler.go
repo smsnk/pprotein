@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"fmt"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
@@ -141,7 +140,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 	if err != nil {
 		return nil, err
 	}
-	in.Warnings = append(in.Warnings, incomplete("httplog", httplogs, groupId, cfg.HTTPLog.Label, false)...)
+	in.Warnings = append(in.Warnings, incomplete(httplogs, groupId, cfg.HTTPLog.Label, false)...)
 	for _, e := range httplogs {
 		if e.Snapshot.GroupId != groupId || e.Status != "ok" {
 			continue
@@ -149,9 +148,8 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 		if cfg.HTTPLog.Label != "" && e.Snapshot.Label != cfg.HTTPLog.Label {
 			continue
 		}
-		if in.Commit == nil && e.Snapshot.Repository != nil && e.Snapshot.Repository.Hash != "" {
-			r := e.Snapshot.Repository
-			in.Commit = &Commit{Hash: r.Hash, Message: firstLine(r.Message), Ref: r.Ref}
+		if in.Commit == nil {
+			in.Commit = e.Snapshot.Repository.Commit()
 		}
 		data, err := api.RawData("httplog", e.Snapshot.ID)
 		if err != nil {
@@ -176,7 +174,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 			}
 		}
 		// dbquery は手で再実行できるので、成功したものがあれば失敗の跡は無視する。
-		in.Warnings = append(in.Warnings, incomplete("dbquery", dbq, groupId, "", latest != nil)...)
+		in.Warnings = append(in.Warnings, incomplete(dbq, groupId, "", latest != nil)...)
 		if latest != nil {
 			body, err := api.Content("dbquery", latest.Snapshot.ID)
 			if err != nil {
@@ -208,7 +206,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 		}
 		if latest != nil {
 			if v, err := api.Score(latest.Snapshot.ID); err == nil {
-				in.Score = &ScoreInfo{Value: v.Score, Passed: v.Passed}
+				in.Score = v.Brief()
 			}
 		}
 	}
@@ -220,35 +218,18 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 	return in, nil
 }
 
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i]
-	}
-	return s
-}
-
 // incomplete は収集グループのうち確定していない（pending / fail の）エントリを警告文にする。
-// 黙って飛ばすと、収集中の走行がライフサイクル 0 件・リクエスト 0 件として読まれてしまう。
-func incomplete(typ string, entries []client.Entry, groupId, label string, ignoreFail bool) []string {
+func incomplete(entries []client.Entry, groupId, label string, ignoreFail bool) []string {
 	warnings := []string{}
 	for _, e := range entries {
-		if e.Snapshot.GroupId != groupId {
+		if e.Snapshot.GroupId != groupId || (label != "" && e.Snapshot.Label != label) {
 			continue
 		}
-		if label != "" && e.Snapshot.Label != label {
+		if ignoreFail && e.Status == "fail" {
 			continue
 		}
-		name := typ
-		if e.Snapshot.Label != "" {
-			name += " " + e.Snapshot.Label
-		}
-		switch e.Status {
-		case "pending":
-			warnings = append(warnings, fmt.Sprintf("%s は収集中（pending）。この集計に含めていない。完了してから再実行する", name))
-		case "fail":
-			if !ignoreFail {
-				warnings = append(warnings, fmt.Sprintf("%s は収集に失敗した（%s）。この集計に含めていない", name, e.Message))
-			}
+		if w := client.Warning(e); w != "" {
+			warnings = append(warnings, w)
 		}
 	}
 	return warnings

@@ -14,6 +14,9 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/md"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 // 複数の走行の要約を1回で返す（GET /api/analysis?limit=N）。
@@ -35,8 +38,8 @@ type (
 
 	RunSummary struct {
 		GroupId    string
-		Score      *ScoreInfo `json:",omitempty"`
-		Commit     *Commit    `json:",omitempty"`
+		Score      *score.Brief `json:",omitempty"`
+		Commit     *git.Commit  `json:",omitempty"`
 		ConfigHash ConfigHash
 		// Warnings は収集中・失敗のエントリなど、この走行の集計が欠けている理由。
 		Warnings []string `json:",omitempty"`
@@ -299,7 +302,7 @@ func Summarize(rep *Report) RunSummary {
 // RenderRunsMarkdown は走行を1行ずつ並べた表にする。
 // 系列は役割（score / driver / penalty）が付いたものを優先し、無ければ先頭から最大6本。
 func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
-	fmt.Fprintf(w, "# analyze-trend（%d 走行、古い順）\n\n", len(resp.Runs))
+	fmt.Fprintf(w, "# analyze trend（%d 走行、古い順）\n\n", len(resp.Runs))
 	if len(resp.Runs) == 0 {
 		fmt.Fprintln(w, "走行なし")
 		return
@@ -342,16 +345,16 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 	for _, l := range lifecycles {
 		head = append(head, l+" 開始→最後")
 	}
-	writeRow(w, head)
-	writeSep(w, len(head))
+	md.Row(w, head)
+	md.Sep(w, len(head))
 
 	for _, r := range resp.Runs {
 		row := []string{r.GroupId, "", "-"}
 		if r.Commit != nil {
-			row[1] = shortHash(r.Commit.Hash)
+			row[1] = r.Commit.ShortHash()
 		}
 		if r.Score != nil {
-			row[2] = scoreCell(r.Score)
+			row[2] = r.Score.String()
 		}
 		totals := map[string]float64{}
 		for _, st := range r.Series {
@@ -359,13 +362,13 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		}
 		for _, n := range series {
 			if v, ok := totals[n]; ok {
-				row = append(row, num(v))
+				row = append(row, md.Num(v))
 			} else {
 				row = append(row, "-")
 			}
 		}
 		q := r.Requests
-		row = append(row, itoa(q.Requests), itoa(q.S5xx), itoa(q.S499), fmt.Sprintf("%.3f", q.P99))
+		row = append(row, md.Int(q.Requests), md.Int(q.S5xx), md.Int(q.S499), md.Sec(q.P99))
 		for _, name := range lifecycles {
 			cell := "-"
 			for _, l := range r.Lifecycles {
@@ -378,7 +381,7 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		if len(r.Warnings) > 0 {
 			row[0] += " ⚠"
 		}
-		writeRow(w, row)
+		md.Row(w, row)
 	}
 	fmt.Fprintln(w)
 
@@ -387,7 +390,7 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		hashes[r.ConfigHash.Analysis+"/"+r.ConfigHash.DBQuery] = true
 	}
 	if len(hashes) > 1 {
-		fmt.Fprintln(w, "- **警告**: 走行によって analysis.yml / dbquery.yml が違う。系列の値はその境目の前後で比べられないことがある")
+		md.Warnings(w, []string{"走行によって analysis.yml / dbquery.yml が違う。系列の値はその境目の前後で比べられないことがある"})
 	}
 	fmt.Fprintln(w, "- ⚠ の走行は集計が欠けている（収集中・失敗のエントリがある）。詳細は analyze <GroupId>")
 }

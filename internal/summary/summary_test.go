@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/goccy/go-json"
 	"github.com/google/pprof/profile"
@@ -114,18 +113,18 @@ func TestParseProfile(t *testing.T) {
 	if len(funcs) != 2 {
 		t.Fatalf("funcs = %+v", funcs)
 	}
-	// flat は葉にだけ付く
-	if funcs[0].Name != "main.handleNotification" || funcs[0].Flat != 1.5e9 {
+	// flat は葉にだけ付く。時間は秒に直す
+	if funcs[0].Name != "main.handleNotification" || funcs[0].Flat != 1.5 {
 		t.Errorf("葉 = %+v", funcs[0])
 	}
-	if funcs[0].FlatPct != 100 {
-		t.Errorf("FlatPct = %v, want 100", funcs[0].FlatPct)
+	if funcs[0].FlatShare != 1 {
+		t.Errorf("FlatShare = %v, want 1", funcs[0].FlatShare)
 	}
 	// 呼び出し元は flat 0 / cum あり
-	if funcs[1].Flat != 0 || funcs[1].Cum != 1.5e9 {
+	if funcs[1].Flat != 0 || funcs[1].Cum != 1.5 {
 		t.Errorf("呼び出し元 = %+v", funcs[1])
 	}
-	if funcs[0].Unit != "nanoseconds" {
+	if funcs[0].Unit != "seconds" {
 		t.Errorf("Unit = %q", funcs[0].Unit)
 	}
 }
@@ -159,21 +158,14 @@ func TestParseProfileInlined(t *testing.T) {
 	for _, f := range funcs {
 		byName[f.Name] = f
 	}
-	if f := byName["leaf"]; f.Flat != 100 || f.FlatPct != 50 {
+	if f := byName["leaf"]; f.Flat != 100e-9 || f.FlatShare != 0.5 {
 		t.Errorf("leaf = %+v", f)
 	}
-	if f := byName["caller"]; f.Flat != 0 || f.Cum != 100 {
+	if f := byName["caller"]; f.Flat != 0 || f.Cum != 100e-9 {
 		t.Errorf("caller（inline された呼び出し元）= %+v", f)
 	}
-	if f := byName["other"]; f.FlatPct != 50 {
+	if f := byName["other"]; f.FlatShare != 0.5 {
 		t.Errorf("other = %+v", f)
-	}
-}
-
-func TestOneLineKeepsUTF8(t *testing.T) {
-	got := oneLine(strings.Repeat("あ", 100))
-	if !utf8.ValidString(got) || !strings.HasSuffix(got, "…") {
-		t.Errorf("oneLine = %q", got)
 	}
 }
 
@@ -250,14 +242,14 @@ func TestLoadAndMarkdown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if g.ID != "2025-11-23_10-41-02.984213" {
-		t.Errorf("ID = %q（最新が選ばれていない）", g.ID)
+	if g.GroupId != "2025-11-23_10-41-02.984213" {
+		t.Errorf("GroupId = %q（最新が選ばれていない）", g.GroupId)
 	}
-	if g.Score == nil || g.Score.Score != 18902 {
+	if g.Score == nil || g.Score.Value != 18902 {
 		t.Errorf("Score = %+v", g.Score)
 	}
-	if g.Repository == nil || g.Repository.Hash != "a1b2c3d4e5f6" {
-		t.Errorf("Repository = %+v", g.Repository)
+	if g.Commit == nil || g.Commit.Hash != "a1b2c3d4e5f6" || g.Commit.Message != "notification のキャッシュ" {
+		t.Errorf("Commit = %+v", g.Commit)
 	}
 	if len(g.HTTPLog) != 1 || len(g.HTTPLog[0].Endpoints) != 2 {
 		t.Errorf("--top が効いていない: %+v", g.HTTPLog)
@@ -265,11 +257,11 @@ func TestLoadAndMarkdown(t *testing.T) {
 
 	md := g.Markdown()
 	for _, want := range []string{
-		"# group 2025-11-23_10-41-02.984213",
-		"score=18902 pass errors=3",
-		`a1b2c3d "notification のキャッシュ"`,
-		"## httplog: isu1",
-		"/api/chair/rides/abc123",
+		"# summary 2025-11-23_10-41-02.984213",
+		"- スコア: 18902\n",
+		`- コミット: a1b2c3d "notification のキャッシュ" (refs/heads/12-cache)`,
+		"## httplog: isu1（SUM の大きい順に 2 件）",
+		"| 1 | GET | /api/chair/rides/abc123 | 0.900s | 0.900s | 0.900s |",
 		"## slowlog: isu1",
 		"ROWS EXAMINED",
 		"## resource: isu1",
@@ -315,7 +307,7 @@ func TestCompare(t *testing.T) {
 	}
 
 	d := Compare(before, after, 10)
-	if d.Score == nil || d.Score.Before != 12345 || d.Score.After != 18902 {
+	if d.Score == nil || d.Score.Before.Value != 12345 || d.Score.After.Value != 18902 {
 		t.Fatalf("Score = %+v", d.Score)
 	}
 
@@ -346,12 +338,11 @@ func TestCompare(t *testing.T) {
 
 	md := d.Markdown()
 	for _, want := range []string{
-		"# diff 2025-11-23_10-21-33.123456 -> 2025-11-23_10-41-02.984213",
-		"score: 12345 -> 18902 (+6557, +53.1%)",
-		"## httplog",
-		"IMPACT",
-		"| isu1 | GET /api/chair/rides/abc123 | 1 → （なし） |",
-		"-0.900（削除）",
+		"# summary diff 2025-11-23_10-21-33.123456 -> 2025-11-23_10-41-02.984213",
+		"- スコア: 12345 -> 18902 (+6557, +53.1%)",
+		`- コミット: a1b2c3d "notification のキャッシュ" (refs/heads/12-cache) -> a1b2c3d "notification のキャッシュ" (refs/heads/12-cache)`,
+		"## httplog（IMPACT の大きい順）",
+		"| isu1 | GET /api/chair/rides/abc123 | 1 → （なし） | 0.900s → （なし） | 0.900s → （なし） | -0.900s（削除） |",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("Markdown に %q が無い:\n%s", want, md)
@@ -363,7 +354,9 @@ func TestCompare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(buf), `"Before":"2025-11-23_10-21-33.123456"`) || strings.Contains(string(buf), "HTTPLog") {
+	if !strings.Contains(string(buf), `"Before":"2025-11-23_10-21-33.123456"`) || strings.Contains(string(buf), "HTTPLog") ||
+		!strings.Contains(string(buf), `"ImpactSec":-0.9`) || !strings.Contains(string(buf), `"Commit":{"Before":{"Hash":"a1b2c3d4e5f6"`) ||
+		strings.Contains(string(buf), `"Key"`) {
 		t.Errorf("JSON = %s", buf)
 	}
 }
@@ -472,7 +465,7 @@ func TestLoadMissingGroup(t *testing.T) {
 	}
 }
 
-// 中身を読めなかったエントリは黙って落とさず Failed に出す
+// 中身を読めなかったエントリは黙って落とさず警告に出す
 func TestLoadReportsUnreadableEntries(t *testing.T) {
 	s := mockServer(t,
 		map[string]map[string]string{
@@ -484,8 +477,8 @@ func TestLoadReportsUnreadableEntries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(g.Failed) != 1 || !strings.HasPrefix(g.Failed[0], "score:isu1 (") {
-		t.Errorf("Failed = %v", g.Failed)
+	if len(g.Warnings) != 1 || !strings.HasPrefix(g.Warnings[0], "score isu1 の中身を読めなかった（") {
+		t.Errorf("Warnings = %v", g.Warnings)
 	}
 	if len(g.HTTPLog) != 1 {
 		t.Errorf("読めたものは残す: %+v", g.HTTPLog)

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 func intp(n int) *int { return &n }
@@ -59,10 +60,10 @@ series:
 	}
 }
 
-func report(id string, hash string, score int64) *Report {
+func report(id string, hash string, value int64) *Report {
 	return &Report{
 		GroupId:    id,
-		Score:      &ScoreInfo{Value: score, Passed: true},
+		Score:      &score.Brief{Value: value, Passed: true},
 		ConfigHash: ConfigHash{Analysis: hash, DBQuery: "db1"},
 	}
 }
@@ -101,7 +102,7 @@ func TestCompareWarnsOnConfigMismatchAndSplitsSeries(t *testing.T) {
 	RenderDiffMarkdown(&buf, d)
 	out := buf.String()
 	for _, want := range []string{
-		"- score: 3000 -> 3600 (+600, +20.0%)",
+		"- スコア: 3000 -> 3600 (+600, +20.0%)",
 		"| tip | 3000 | 3600 | +600 | +20.0% | 50s→45s | 85s→80s |",
 		"| old | 5 | （なし） | 削除 |",
 		"| new | （なし） | 7 | 追加 |",
@@ -146,7 +147,7 @@ func TestCompareLifecyclesAlignsStepsByName(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	RenderDiffMarkdown(&buf, d)
-	if !strings.Contains(buf.String(), "| post | 17→29 | 89.5%→96.7% | 0→0 | 0.0→0.0 | 0.50s→0.20s | 3.70s→1.00s |") {
+	if !strings.Contains(buf.String(), "| post | 17→29 | 89.5%→96.7% | 0→0 | 0.0→0.0 | 0.500s→0.200s | 3.700s→1.000s |") {
 		t.Errorf("markdown:\n%s", buf.String())
 	}
 }

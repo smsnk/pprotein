@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 type (
@@ -25,22 +27,11 @@ type (
 		Warnings []string
 
 		// Score はこの収集に紐づいたベンチのスコア。無ければ nil。
-		Score *ScoreInfo
+		Score *score.Brief
 		// ConfigHash は集計に使った設定のハッシュ。走行間の比較で定義の食い違いを見つけるのに使う。
 		ConfigHash ConfigHash
 		// Commit は httplog に記録されたアプリのコミット。無ければ nil。
-		Commit *Commit
-	}
-
-	Commit struct {
-		Hash    string
-		Message string
-		Ref     string `json:",omitempty"`
-	}
-
-	ScoreInfo struct {
-		Value  int64
-		Passed bool
+		Commit *git.Commit
 	}
 
 	// ConfigHash の各値は設定ファイルの中身の SHA-256 の先頭12桁。取れなかったものは空。
@@ -56,10 +47,10 @@ type (
 	Report struct {
 		GroupId    string
 		Origin     time.Time
-		Bucket     int        `json:"BucketSec"`
-		Warnings   []string   `json:",omitempty"`
-		Score      *ScoreInfo `json:",omitempty"`
-		Commit     *Commit    `json:",omitempty"`
+		Bucket     int          `json:"BucketSec"`
+		Warnings   []string     `json:",omitempty"`
+		Score      *score.Brief `json:",omitempty"`
+		Commit     *git.Commit  `json:",omitempty"`
 		ConfigHash ConfigHash
 
 		// Totals は走行全体のリクエストの集計（収集開始より後のもの）。

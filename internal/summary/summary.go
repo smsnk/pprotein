@@ -14,20 +14,18 @@ import (
 type (
 	// Group は1回の収集（GroupId）の中身をまとめたもの。
 	Group struct {
-		ID         string
-		Datetime   time.Time
-		Repository *git.RepositoryInfo
-		Score      *score.Value
+		GroupId  string
+		Datetime time.Time
+		Score    *score.Brief `json:",omitempty"`
+		Commit   *git.Commit  `json:",omitempty"`
+		// Warnings は集計に含めていないエントリ（収集中・失敗・中身を読めなかったもの）。
+		Warnings []string `json:",omitempty"`
 
-		HTTPLog  []LabeledEndpoints
-		SlowLog  []LabeledQueries
-		Profiles []LabeledFuncs
-		Resource []LabeledText
-		Memo     []LabeledText
-
-		// Pending / Failed は収集がまだ終わっていない / 失敗したエントリ。
-		Pending []string
-		Failed  []string
+		HTTPLog  []LabeledEndpoints `json:",omitempty"`
+		SlowLog  []LabeledQueries   `json:",omitempty"`
+		Profiles []LabeledFuncs     `json:",omitempty"`
+		Resource []LabeledText      `json:",omitempty"`
+		Memo     []LabeledText      `json:",omitempty"`
 	}
 
 	LabeledEndpoints struct {
@@ -64,7 +62,7 @@ func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, 
 		groupID = ids[0]
 	}
 
-	g := &Group{ID: groupID}
+	g := &Group{GroupId: groupID}
 	mine := []client.Entry{}
 	for _, e := range entries {
 		if e.Snapshot.GroupId == groupID {
@@ -84,29 +82,25 @@ func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, 
 		if g.Datetime.IsZero() || s.Datetime.Before(g.Datetime) {
 			g.Datetime = s.Datetime
 		}
-		if g.Repository == nil && s.Repository != nil && s.Repository.Hash != "" {
-			g.Repository = s.Repository
+		if g.Commit == nil {
+			g.Commit = s.Repository.Commit()
 		}
 		if len(types) > 0 && !slices.Contains(types, s.Type) {
 			continue
 		}
 
-		switch e.Status {
-		case "pending":
-			g.Pending = append(g.Pending, fmt.Sprintf("%s:%s", s.Type, s.Label))
-			continue
-		case "fail":
-			g.Failed = append(g.Failed, fmt.Sprintf("%s:%s (%s)", s.Type, s.Label, e.Message))
+		if w := client.Warning(e); w != "" {
+			g.Warnings = append(g.Warnings, w)
 			continue
 		}
 
-		// 読めなかったものは黙って飛ばさず Failed に出す。節が丸ごと消えると「計測が無い」と読まれる。
+		// 読めなかったものも黙って飛ばさず警告に出す。節が丸ごと消えると「計測が無い」と読まれる。
 		var err error
 		switch s.Type {
 		case "score":
 			var v *score.Value
 			if v, err = c.Score(s.ID); err == nil {
-				g.Score = v
+				g.Score = v.Brief()
 			}
 		case "httplog":
 			var tsv string
@@ -138,7 +132,7 @@ func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, 
 			}
 		}
 		if err != nil {
-			g.Failed = append(g.Failed, fmt.Sprintf("%s:%s (%v)", s.Type, s.Label, err))
+			g.Warnings = append(g.Warnings, fmt.Sprintf("%s の中身を読めなかった（%v）。この集計に含めていない", e.Name(), err))
 		}
 	}
 

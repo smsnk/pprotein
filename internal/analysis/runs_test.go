@@ -9,6 +9,8 @@ import (
 
 	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 func idxEntry(typ, id, gid, status string) client.Entry {
@@ -39,8 +41,8 @@ func TestFingerprintChangesWithMaterialAndSkipsPending(t *testing.T) {
 func TestSummarizeAndRenderRuns(t *testing.T) {
 	rep := &Report{
 		GroupId: "2026-10-11_17-02-15.633789",
-		Score:   &ScoreInfo{Value: 3385, Passed: true},
-		Commit:  &Commit{Hash: "6f32b72aaaaaaa", Message: "msg"},
+		Score:   &score.Brief{Value: 3385, Passed: true},
+		Commit:  &git.Commit{Hash: "6f32b72aaaaaaa", Message: "msg"},
 		Totals: Totals{Requests: 100, S5xx: 1, Canceled: 2, P99: 3.109,
 			Endpoints: map[string]int{"GET /icon": 60, "POST /c": 30, "GET /a": 10}},
 		SeriesStats: []SeriesStat{
@@ -67,7 +69,7 @@ func TestSummarizeAndRenderRuns(t *testing.T) {
 	if !strings.Contains(out, "| GroupId | commit | score | tip [score] | ng_word [penalty] | req | 5xx | 499 | p99 | viewer 開始→最後 |") {
 		t.Errorf("header:\n%s", out)
 	}
-	if !strings.Contains(out, "| 2026-10-11_17-02-15.633789 | 6f32b72 | 3385 | 3385 | 17 | 100 | 1 | 2 | 3.109 | 20→17 |") {
+	if !strings.Contains(out, "| 2026-10-11_17-02-15.633789 | 6f32b72 | 3385 | 3385 | 17 | 100 | 1 | 2 | 3.109s | 20→17 |") {
 		t.Errorf("row:\n%s", out)
 	}
 }

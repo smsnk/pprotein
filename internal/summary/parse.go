@@ -3,6 +3,7 @@ package summary
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,30 +17,31 @@ type (
 		Method string
 		Uri    string
 		Count  float64
-		Sum    float64
-		Avg    float64
-		P99    float64
-		Max    float64
+		Sum    float64 `json:"SumSec"`
+		Avg    float64 `json:"AvgSec"`
+		P99    float64 `json:"P99Sec"`
+		Max    float64 `json:"MaxSec"`
 	}
 
 	// Query は slp の1行。
 	Query struct {
 		Query string
 		Count float64
-		Sum   float64
-		Avg   float64
-		Max   float64
+		Sum   float64 `json:"SumSec"`
+		Avg   float64 `json:"AvgSec"`
+		Max   float64 `json:"MaxSec"`
 		// RowsExamined は1回あたりの走査行数の平均。インデックスの当たり外れが出る。
-		RowsExamined float64
+		RowsExamined float64 `json:"RowsExaminedAvg"`
 	}
 
-	// Func は pprof の1関数。
+	// Func は pprof の1関数。Flat / Cum の単位は Unit（時間のプロファイルなら seconds）。
 	Func struct {
-		Name    string
-		Flat    float64
-		FlatPct float64
-		Cum     float64
-		Unit    string
+		Name string
+		Flat float64
+		Cum  float64
+		Unit string
+		// FlatShare は全サンプルの flat に占める割合（0〜1）。
+		FlatShare float64
 	}
 )
 
@@ -147,9 +149,12 @@ func ParseProfile(raw []byte) ([]Func, error) {
 		return nil, fmt.Errorf("profile has no sample type")
 	}
 
-	// CPU プロファイルなら最後が nanoseconds。fgprof も同じ形。
+	// CPU プロファイルなら最後が nanoseconds。fgprof も同じ形。時間は秒に直す。
 	idx := len(p.SampleType) - 1
-	unit := p.SampleType[idx].Unit
+	unit, div := p.SampleType[idx].Unit, 1.0
+	if unit == "nanoseconds" {
+		unit, div = "seconds", 1e9
+	}
 
 	flat := map[string]float64{}
 	cum := map[string]float64{}
@@ -187,9 +192,9 @@ func ParseProfile(raw []byte) ([]Func, error) {
 
 	out := make([]Func, 0, len(cum))
 	for name, c := range cum {
-		f := Func{Name: name, Flat: flat[name], Cum: c, Unit: unit}
+		f := Func{Name: name, Flat: flat[name] / div, Cum: c / div, Unit: unit}
 		if totalFlat > 0 {
-			f.FlatPct = flat[name] / totalFlat * 100
+			f.FlatShare = math.Round(flat[name]/totalFlat*1e4) / 1e4 // analysis と同じく 0.01% の単位に丸める
 		}
 		out = append(out, f)
 	}

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/md"
 )
 
 // セッション（httplog の entity_key で束ねた利用者）単位で導線を見る。
@@ -390,20 +391,20 @@ func (h *Handler) getTransitions(c echo.Context) error {
 // --- Markdown（CLI） ---
 
 func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, top int) {
-	fmt.Fprintf(w, "# sessions %s（%d / 全 %d セッション）\n\n", s.GroupId, len(s.Sessions), s.Total)
+	fmt.Fprintf(w, "# analyze sessions %s（%d / 全 %d セッション）\n\n", s.GroupId, len(s.Sessions), s.Total)
 	head := []string{"ID", "開始", "終了", "req", "エラー", "499", "最大応答", "host"}
 	for _, l := range s.Lifecycles {
 		head = append(head, l.Name)
 	}
-	writeRow(w, head)
-	writeSep(w, len(head))
+	md.Row(w, head)
+	md.Sep(w, len(head))
 	for i, x := range s.Sessions {
 		if top > 0 && i >= top {
 			fmt.Fprintf(w, "\n（残り %d 件は --top で増やす）\n", len(s.Sessions)-top)
 			break
 		}
 		row := []string{x.ID, fmt.Sprintf("%.1fs", x.StartSec), fmt.Sprintf("%.1fs", x.EndSec),
-			itoa(x.Requests), itoa(x.Errors), itoa(x.S499), sec(x.MaxReqSec), strings.Join(x.Hosts, " ")}
+			md.Int(x.Requests), md.Int(x.Errors), md.Int(x.S499), md.Sec(x.MaxReqSec), strings.Join(x.Hosts, " ")}
 		for _, r := range x.Lifecycles {
 			if r.Reached == 0 {
 				row = append(row, "-")
@@ -411,20 +412,20 @@ func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, top int) {
 				row = append(row, fmt.Sprintf("%d:%s", r.Reached, r.LastStep))
 			}
 		}
-		writeRow(w, row)
+		md.Row(w, row)
 	}
 	fmt.Fprintln(w)
 }
 
 func RenderSessionMarkdown(w io.Writer, d *SessionDetail) {
 	s := d.Summary
-	fmt.Fprintf(w, "# session %s（%s）\n\n", s.ID, d.GroupId)
+	fmt.Fprintf(w, "# analyze session %s（%s）\n\n", s.ID, d.GroupId)
 	fmt.Fprintf(w, "- %.1fs〜%.1fs、%d 要求、エラー %d、499 %d\n\n", s.StartSec, s.EndSec, s.Requests, s.Errors, s.S499)
-	writeRow(w, []string{"t", "要求", "host", "status", "応答", "進んだ状態"})
-	writeSep(w, 6)
+	md.Row(w, []string{"t", "要求", "host", "status", "応答", "進んだ状態"})
+	md.Sep(w, 6)
 	for _, r := range d.Requests {
-		writeRow(w, []string{fmt.Sprintf("%.3fs", r.OffsetSec), r.Method + " " + r.URI, r.Host,
-			itoa(r.Status), sec(r.ReqTimeSec), strings.Join(r.Steps, ", ")})
+		md.Row(w, []string{fmt.Sprintf("%.3fs", r.OffsetSec), r.Method + " " + r.URI, r.Host,
+			md.Int(r.Status), md.Sec(r.ReqTimeSec), strings.Join(r.Steps, ", ")})
 	}
 	fmt.Fprintln(w)
 }
@@ -434,15 +435,15 @@ func RenderTransitionsMarkdown(w io.Writer, t *TransitionsResponse) {
 	if t.Lifecycle != "" {
 		title = "ライフサイクル " + t.Lifecycle + " に入ったセッション"
 	}
-	fmt.Fprintf(w, "# transitions %s（%s、%d セッション、件数の多い順）\n\n", t.GroupId, title, t.Sessions)
-	writeRow(w, []string{"from", "to", "件数", "from の次に占める割合", "間隔 p50"})
-	writeSep(w, 5)
+	fmt.Fprintf(w, "# analyze transitions %s（%s、%d セッション、件数の多い順）\n\n", t.GroupId, title, t.Sessions)
+	md.Row(w, []string{"from", "to", "件数", "from の次に占める割合", "間隔 p50"})
+	md.Sep(w, 5)
 	for _, x := range t.Transitions {
 		gap := ""
 		if x.To != transitionEnd && x.From != transitionStart {
-			gap = sec(x.GapP50Sec)
+			gap = md.Sec(x.GapP50Sec)
 		}
-		writeRow(w, []string{x.From, x.To, itoa(x.Count), pct(x.ShareOfFrom), gap})
+		md.Row(w, []string{x.From, x.To, md.Int(x.Count), md.Pct(x.ShareOfFrom), gap})
 	}
 	fmt.Fprintln(w)
 }

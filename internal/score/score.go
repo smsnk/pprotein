@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/smsnk/pprotein/internal/md"
 )
 
 // Value は1回の走行の結果。snapshot の本体としてこの JSON が保存される。
@@ -57,4 +59,46 @@ func (v *Value) Duration() time.Duration {
 		return 0
 	}
 	return v.FinishedAt.Sub(v.StartedAt)
+}
+
+// Brief は推移や比較に出すスコアの要点。
+type Brief struct {
+	Value  int64
+	Passed bool
+}
+
+func (v *Value) Brief() *Brief {
+	return &Brief{Value: v.Score, Passed: v.Passed}
+}
+
+// String は「18902」、失敗した走行なら「18902 (FAIL)」。
+func (b *Brief) String() string {
+	if b == nil {
+		return "（なし）"
+	}
+	if !b.Passed {
+		return fmt.Sprintf("%d (FAIL)", b.Value)
+	}
+	return fmt.Sprintf("%d", b.Value)
+}
+
+// Diff は2回の走行のスコア。片方に無ければ nil。
+type Diff struct {
+	Before *Brief `json:",omitempty"`
+	After  *Brief `json:",omitempty"`
+}
+
+// String は「12345 -> 18902 (+6557, +53.1%)」。
+func (d *Diff) String() string {
+	before, after := d.Before, d.After
+	line := before.String() + " -> " + after.String()
+	if before == nil || after == nil {
+		return line
+	}
+	b, a := float64(before.Value), float64(after.Value)
+	delta := md.Signed(a-b, md.Num)
+	if pct := md.Change(b, a); pct != "" {
+		delta += ", " + pct
+	}
+	return line + " (" + delta + ")"
 }
