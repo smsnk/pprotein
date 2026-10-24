@@ -164,18 +164,18 @@ func ParseProfile(raw []byte) ([]Func, error) {
 			continue
 		}
 
-		// Location[0] が葉。1サンプル内の同じ関数を二重に数えない。
+		// Location[0] が葉。inline された関数は1つの Location の Line に並び、Line[0] が最も内側。
+		// flat は葉の Line[0] にだけ付ける。cum は1サンプル内の同じ関数を二重に数えない。
 		seen := map[string]bool{}
 		for i, loc := range s.Location {
-			for _, line := range loc.Line {
+			for j, line := range loc.Line {
 				if line.Function == nil {
 					continue
 				}
 				name := line.Function.Name
-				if i == 0 && !seen["flat:"+name] {
+				if i == 0 && j == 0 {
 					flat[name] += v
 					totalFlat += v
-					seen["flat:"+name] = true
 				}
 				if !seen[name] {
 					cum[name] += v
@@ -193,11 +193,15 @@ func ParseProfile(raw []byte) ([]Func, error) {
 		}
 		out = append(out, f)
 	}
+	// 同じ値なら名前の順にして、実行ごとに並びが変わらないようにする（サンプリングなので同じ値はよくある）
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Flat != out[j].Flat {
 			return out[i].Flat > out[j].Flat
 		}
-		return out[i].Cum > out[j].Cum
+		if out[i].Cum != out[j].Cum {
+			return out[i].Cum > out[j].Cum
+		}
+		return out[i].Name < out[j].Name
 	})
 	return out, nil
 }

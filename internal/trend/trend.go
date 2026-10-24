@@ -111,7 +111,7 @@ func (h *Handler) getTrend(c echo.Context) error {
 		// topN で切り詰める前の全件を読む。Metrics（総数・合計）を
 		// 上位 topN 件だけから集計すると、件数の多い軽量エンドポイントが
 		// 抜け落ちて「リクエスト総数」が実際より小さく出る。
-		g, err := summary.Load(h.client, id, 0)
+		g, err := summary.Load(h.client, id, 0, "score", "httplog", "slowlog")
 		if err != nil {
 			continue // 収集中 / 壊れている group は飛ばす
 		}

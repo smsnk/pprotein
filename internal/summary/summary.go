@@ -2,6 +2,7 @@ package summary
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -48,7 +49,8 @@ type (
 )
 
 // Load は GroupId（空なら最新）の中身を集めて Group にする。
-func Load(c *client.Client, groupID string, topN int) (*Group, error) {
+// types を渡すと、その収集タイプだけを読む（diff に pprof のプロファイルは要らない）。
+func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, error) {
 	entries, err := c.AllEntries()
 	if err != nil {
 		return nil, err
@@ -72,7 +74,8 @@ func Load(c *client.Client, groupID string, topN int) (*Group, error) {
 	if len(mine) == 0 {
 		return nil, fmt.Errorf("group が見つかりません: %s", groupID)
 	}
-	sort.Slice(mine, func(i, j int) bool {
+	// 同じ label の中は収集タイプの順のまま（警告の並びが実行ごとに変わらないように）
+	sort.SliceStable(mine, func(i, j int) bool {
 		return mine[i].Snapshot.Label < mine[j].Snapshot.Label
 	})
 
@@ -84,6 +87,9 @@ func Load(c *client.Client, groupID string, topN int) (*Group, error) {
 		if g.Repository == nil && s.Repository != nil && s.Repository.Hash != "" {
 			g.Repository = s.Repository
 		}
+		if len(types) > 0 && !slices.Contains(types, s.Type) {
+			continue
+		}
 
 		switch e.Status {
 		case "pending":
@@ -94,38 +100,45 @@ func Load(c *client.Client, groupID string, topN int) (*Group, error) {
 			continue
 		}
 
+		// 読めなかったものは黙って飛ばさず Failed に出す。節が丸ごと消えると「計測が無い」と読まれる。
+		var err error
 		switch s.Type {
 		case "score":
-			if v, err := c.Score(s.ID); err == nil {
+			var v *score.Value
+			if v, err = c.Score(s.ID); err == nil {
 				g.Score = v
 			}
 		case "httplog":
-			if tsv, err := c.Content(s.Type, s.ID); err == nil {
+			var tsv string
+			if tsv, err = c.Content(s.Type, s.ID); err == nil {
 				g.HTTPLog = append(g.HTTPLog, LabeledEndpoints{s.Label, head(ParseEndpoints(tsv), topN)})
 			}
 		case "slowlog":
-			if tsv, err := c.Content(s.Type, s.ID); err == nil {
+			var tsv string
+			if tsv, err = c.Content(s.Type, s.ID); err == nil {
 				g.SlowLog = append(g.SlowLog, LabeledQueries{s.Label, head(ParseQueries(tsv), topN)})
 			}
 		case "resource":
-			if text, err := c.Content(s.Type, s.ID); err == nil {
+			var text string
+			if text, err = c.Content(s.Type, s.ID); err == nil {
 				g.Resource = append(g.Resource, LabeledText{s.Label, text})
 			}
 		case "memo":
-			if text, err := c.Content(s.Type, s.ID); err == nil {
+			var text string
+			if text, err = c.Content(s.Type, s.ID); err == nil {
 				g.Memo = append(g.Memo, LabeledText{s.Label, text})
 			}
 		case "pprof":
-			raw, err := c.RawData(s.Type, s.ID)
-			if err != nil {
-				continue
+			var raw []byte
+			if raw, err = c.RawData(s.Type, s.ID); err == nil {
+				var funcs []Func
+				if funcs, err = ParseProfile(raw); err == nil {
+					g.Profiles = append(g.Profiles, LabeledFuncs{s.Label, head(funcs, topN)})
+				}
 			}
-			funcs, err := ParseProfile(raw)
-			if err != nil {
-				g.Failed = append(g.Failed, fmt.Sprintf("pprof:%s (%v)", s.Label, err))
-				continue
-			}
-			g.Profiles = append(g.Profiles, LabeledFuncs{s.Label, head(funcs, topN)})
+		}
+		if err != nil {
+			g.Failed = append(g.Failed, fmt.Sprintf("%s:%s (%v)", s.Type, s.Label, err))
 		}
 	}
 

@@ -130,11 +130,12 @@ func run() error {
 		if len(args) < 2 {
 			return fmt.Errorf("比較する2つの groupId を指定してください")
 		}
-		before, err := summary.Load(c, args[0], 0)
+		// 比べるのは httplog / slowlog だけなので、pprof のプロファイルなどは読まない
+		before, err := summary.Load(c, args[0], 0, diffTypes...)
 		if err != nil {
 			return err
 		}
-		after, err := summary.Load(c, args[1], 0)
+		after, err := summary.Load(c, args[1], 0, diffTypes...)
 		if err != nil {
 			return err
 		}
@@ -279,6 +280,8 @@ func run() error {
 		return fmt.Errorf("unknown command: %s", cmd)
 	}
 }
+
+var diffTypes = []string{"score", "httplog", "slowlog"}
 
 func printGroup(c *client.Client, id string, topN int, asJSON bool) error {
 	g, err := summary.Load(c, id, topN)
