@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/google/pprof/profile"
+	"github.com/smsnk/pprotein/internal/client"
 )
 
 // alp v1.0.21 に --format tsv を実行させた実際の出力。
@@ -131,7 +132,7 @@ func mockServer(t *testing.T, groups map[string]map[string]string, scores map[st
 	t.Helper()
 
 	mux := http.NewServeMux()
-	for _, typ := range CollectTypes {
+	for _, typ := range client.Types {
 		typ := typ
 		mux.HandleFunc("/api/"+typ, func(w http.ResponseWriter, r *http.Request) {
 			entries := []string{}
@@ -194,7 +195,7 @@ func TestLoadAndMarkdown(t *testing.T) {
 		},
 	)
 
-	g, err := Load(NewClient(s.URL), "", 2)
+	g, err := Load(client.New(s.URL), "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,7 +253,7 @@ func TestCompare(t *testing.T) {
 			"2025-11-23_10-41-02.984213": `{"Score":18902,"Passed":true}`,
 		},
 	)
-	c := NewClient(s.URL)
+	c := client.New(s.URL)
 
 	before, err := Load(c, "2025-11-23_10-21-33.123456", 0)
 	if err != nil {
@@ -318,7 +319,7 @@ func TestCompareRanksByImpactNotSumDelta(t *testing.T) {
 		"2025-11-23_10-21-33.123456": {"httplog": beforeAlp},
 		"2025-11-23_10-41-02.984213": {"httplog": afterAlp},
 	}, map[string]string{})
-	c := NewClient(s.URL)
+	c := client.New(s.URL)
 
 	before, err := Load(c, "2025-11-23_10-21-33.123456", 0)
 	if err != nil {
@@ -345,10 +346,10 @@ func TestCompareRanksByImpactNotSumDelta(t *testing.T) {
 
 func TestLoadMissingGroup(t *testing.T) {
 	s := mockServer(t, map[string]map[string]string{}, map[string]string{})
-	if _, err := Load(NewClient(s.URL), "", 10); err == nil {
+	if _, err := Load(client.New(s.URL), "", 10); err == nil {
 		t.Error("収集が無いときはエラーにする")
 	}
-	if _, err := Load(NewClient(s.URL), "nosuch", 10); err == nil {
+	if _, err := Load(client.New(s.URL), "nosuch", 10); err == nil {
 		t.Error("存在しない group はエラーにする")
 	}
 }

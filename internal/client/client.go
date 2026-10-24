@@ -1,6 +1,6 @@
-// Package summary は pprotein の API を叩いて計測結果を取り出し、
-// テキスト（Markdown）や JSON に整形する。CLI から使う。
-package summary
+// Package client は pprotein の HTTP API を読む。
+// CLI と、自分自身の API から材料を読むサーバー側の集計（analysis / trend）が使う。
+package client
 
 import (
 	"fmt"
@@ -36,7 +36,7 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-func NewClient(baseURL string) *Client {
+func New(baseURL string) *Client {
 	return &Client{
 		BaseURL: baseURL,
 		HTTP:    &http.Client{Timeout: 60 * time.Second},
@@ -121,15 +121,15 @@ func (c *Client) StartCollect() error {
 	return err
 }
 
-// CollectTypes は summary が読む収集タイプ。表示する順に並べてある。
-var CollectTypes = []string{"score", "httplog", "slowlog", "resource", "pprof", "memo"}
+// Types は summary が読む収集タイプ。表示する順に並べてある。
+var Types = []string{"score", "httplog", "slowlog", "resource", "pprof", "memo"}
 
 // AllEntries は全タイプのエントリをまとめて取る。
 // 収集タイプが存在しない（古い pprotein）場合はそのタイプを黙って飛ばす。
 func (c *Client) AllEntries() ([]Entry, error) {
 	var all []Entry
 	var firstErr error
-	for _, typ := range CollectTypes {
+	for _, typ := range Types {
 		entries, err := c.Entries(typ)
 		if err != nil {
 			if firstErr == nil {

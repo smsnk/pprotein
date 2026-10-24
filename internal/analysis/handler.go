@@ -9,10 +9,10 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
 	"github.com/smsnk/pprotein/internal/persistent"
 	"github.com/smsnk/pprotein/internal/storage"
-	"github.com/smsnk/pprotein/internal/summary"
 )
 
 //go:embed analysis.yml
@@ -21,7 +21,7 @@ var defaultConfig []byte
 // Handler は /api/analysis を提供する。
 // trend と同じく自分自身の API から材料を読むので、収集タイプの実装には手を入れない。
 type Handler struct {
-	client *summary.Client
+	client *client.Client
 	config *persistent.Handler
 	cache  *memo[*Report]
 	// sessions はセッションの導線（sessions.go）の集計結果
@@ -35,7 +35,7 @@ func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create config: %w", err)
 	}
-	return &Handler{client: summary.NewClient(selfURL), config: config, cache: newMemo[*Report](), sessions: newMemo[*sessionIndex](), endpoints: newMemo[*EndpointTimeline]()}, nil
+	return &Handler{client: client.New(selfURL), config: config, cache: newMemo[*Report](), sessions: newMemo[*sessionIndex](), endpoints: newMemo[*EndpointTimeline]()}, nil
 }
 
 func sanitize(raw []byte) ([]byte, error) {
@@ -97,18 +97,18 @@ func (h *Handler) get(c echo.Context) error {
 
 // LatestGroup は httplog がある最新の収集グループを返す。
 // 収集中（pending）のものも含める。走行直後に latest を引いて1つ前の走行が出ると、取り違えに気づけない。
-func LatestGroup(client *summary.Client) (string, error) {
-	entries, err := client.Entries("httplog")
+func LatestGroup(api *client.Client) (string, error) {
+	entries, err := api.Entries("httplog")
 	if err != nil {
 		return "", err
 	}
-	live := []summary.Entry{}
+	live := []client.Entry{}
 	for _, e := range entries {
 		if e.Status != "fail" {
 			live = append(live, e)
 		}
 	}
-	ids := summary.GroupIDs(live)
+	ids := client.GroupIDs(live)
 	if len(ids) == 0 {
 		return "", fmt.Errorf("no httplog is collected")
 	}
@@ -116,7 +116,7 @@ func LatestGroup(client *summary.Client) (string, error) {
 }
 
 // Load は収集グループの httplog（生ログ）と dbquery の結果を集める。
-func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
+func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 	origin, err := time.ParseInLocation(dbquery.GroupIdLayout, groupId, time.Local)
 	if err != nil {
 		return nil, fmt.Errorf("GroupId is not a time: %w", err)
@@ -127,7 +127,7 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 		Queries: map[string]*dbquery.QueryResult{},
 	}
 
-	alpConfig, err := client.Config("httplog")
+	alpConfig, err := api.Config("httplog")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read alp config: %w", err)
 	}
@@ -137,7 +137,7 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 	}
 
 	found := false
-	httplogs, err := client.Entries("httplog")
+	httplogs, err := api.Entries("httplog")
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +153,7 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 			r := e.Snapshot.Repository
 			in.Commit = &Commit{Hash: r.Hash, Message: firstLine(r.Message), Ref: r.Ref}
 		}
-		data, err := client.RawData("httplog", e.Snapshot.ID)
+		data, err := api.RawData("httplog", e.Snapshot.ID)
 		if err != nil {
 			return nil, err
 		}
@@ -164,8 +164,8 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 	}
 
 	// dbquery は無くてもよい（古い収集や、SQL を使わない回）。
-	if dbq, err := client.Entries("dbquery"); err == nil {
-		var latest *summary.Entry
+	if dbq, err := api.Entries("dbquery"); err == nil {
+		var latest *client.Entry
 		for i := range dbq {
 			e := &dbq[i]
 			if e.Snapshot.GroupId != groupId || e.Status != "ok" {
@@ -178,7 +178,7 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 		// dbquery は手で再実行できるので、成功したものがあれば失敗の跡は無視する。
 		in.Warnings = append(in.Warnings, incomplete("dbquery", dbq, groupId, "", latest != nil)...)
 		if latest != nil {
-			body, err := client.Content("dbquery", latest.Snapshot.ID)
+			body, err := api.Content("dbquery", latest.Snapshot.ID)
 			if err != nil {
 				return nil, err
 			}
@@ -195,8 +195,8 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 	}
 
 	// スコアは無くてもよい（ベンチの結果を送っていない走行）。複数あれば新しいものを使う。
-	if scores, err := client.Entries("score"); err == nil {
-		var latest *summary.Entry
+	if scores, err := api.Entries("score"); err == nil {
+		var latest *client.Entry
 		for i := range scores {
 			e := &scores[i]
 			if e.Snapshot.GroupId != groupId || e.Status != "ok" {
@@ -207,7 +207,7 @@ func Load(client *summary.Client, cfg *Config, groupId string) (*Input, error) {
 			}
 		}
 		if latest != nil {
-			if v, err := client.Score(latest.Snapshot.ID); err == nil {
+			if v, err := api.Score(latest.Snapshot.ID); err == nil {
 				in.Score = &ScoreInfo{Value: v.Score, Passed: v.Passed}
 			}
 		}
@@ -229,7 +229,7 @@ func firstLine(s string) string {
 
 // incomplete は収集グループのうち確定していない（pending / fail の）エントリを警告文にする。
 // 黙って飛ばすと、収集中の走行がライフサイクル 0 件・リクエスト 0 件として読まれてしまう。
-func incomplete(typ string, entries []summary.Entry, groupId, label string, ignoreFail bool) []string {
+func incomplete(typ string, entries []client.Entry, groupId, label string, ignoreFail bool) []string {
 	warnings := []string{}
 	for _, e := range entries {
 		if e.Snapshot.GroupId != groupId {
@@ -255,10 +255,10 @@ func incomplete(typ string, entries []summary.Entry, groupId, label string, igno
 }
 
 // Pending は収集グループの httplog / dbquery のうち、まだ収集中のエントリの数を返す。
-func Pending(client *summary.Client, groupId string) (int, error) {
+func Pending(api *client.Client, groupId string) (int, error) {
 	n := 0
 	for _, typ := range []string{"httplog", "dbquery"} {
-		entries, err := client.Entries(typ)
+		entries, err := api.Entries(typ)
 		if err != nil {
 			// dbquery は無くてもよい
 			if typ == "dbquery" {

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/git"
 	"github.com/smsnk/pprotein/internal/score"
 )
@@ -47,14 +48,14 @@ type (
 )
 
 // Load は GroupId（空なら最新）の中身を集めて Group にする。
-func Load(c *Client, groupID string, topN int) (*Group, error) {
+func Load(c *client.Client, groupID string, topN int) (*Group, error) {
 	entries, err := c.AllEntries()
 	if err != nil {
 		return nil, err
 	}
 
 	if groupID == "" {
-		ids := GroupIDs(entries)
+		ids := client.GroupIDs(entries)
 		if len(ids) == 0 {
 			return nil, fmt.Errorf("収集がありません（まず pprotein-cli collect を実行してください）")
 		}
@@ -62,7 +63,7 @@ func Load(c *Client, groupID string, topN int) (*Group, error) {
 	}
 
 	g := &Group{ID: groupID}
-	mine := []Entry{}
+	mine := []client.Entry{}
 	for _, e := range entries {
 		if e.Snapshot.GroupId == groupID {
 			mine = append(mine, e)

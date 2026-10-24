@@ -12,8 +12,8 @@ import (
 	"sync"
 
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
-	"github.com/smsnk/pprotein/internal/summary"
 )
 
 // 複数の走行の要約を1回で返す（GET /api/analysis?limit=N）。
@@ -127,14 +127,14 @@ func (c *memo[T]) put(key string, r T) {
 }
 
 // entryIndex は収集タイプをまたいだエントリを GroupId ごとにまとめる。
-type entryIndex map[string][]summary.Entry
+type entryIndex map[string][]client.Entry
 
 var cacheTypes = []string{"httplog", "dbquery", "score"}
 
-func loadEntryIndex(client *summary.Client) (entryIndex, error) {
+func loadEntryIndex(api *client.Client) (entryIndex, error) {
 	idx := entryIndex{}
 	for _, typ := range cacheTypes {
-		entries, err := client.Entries(typ)
+		entries, err := api.Entries(typ)
 		if err != nil {
 			if typ == "httplog" {
 				return nil, err
@@ -200,7 +200,7 @@ func (h *Handler) getRuns(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	httplogs := []summary.Entry{}
+	httplogs := []client.Entry{}
 	for _, entries := range idx {
 		for _, e := range entries {
 			if e.Snapshot.Type == "httplog" && e.Status != "fail" {
@@ -208,7 +208,7 @@ func (h *Handler) getRuns(c echo.Context) error {
 			}
 		}
 	}
-	ids := summary.GroupIDs(httplogs) // 新しい順
+	ids := client.GroupIDs(httplogs) // 新しい順
 	if len(ids) > limit {
 		ids = ids[:limit]
 	}

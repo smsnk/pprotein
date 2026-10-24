@@ -29,6 +29,7 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/smsnk/pprotein/internal/analysis"
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/summary"
 )
 
@@ -110,7 +111,7 @@ func run() error {
 		}
 	})
 
-	c := summary.NewClient(*url)
+	c := client.New(*url)
 
 	switch cmd {
 	case "latest":
@@ -279,7 +280,7 @@ func run() error {
 	}
 }
 
-func printGroup(c *summary.Client, id string, topN int, asJSON bool) error {
+func printGroup(c *client.Client, id string, topN int, asJSON bool) error {
 	g, err := summary.Load(c, id, topN)
 	if err != nil {
 		return err
@@ -292,7 +293,7 @@ func printGroup(c *summary.Client, id string, topN int, asJSON bool) error {
 }
 
 // printAnalysis は /api/analysis/:id を読む。集計はサーバー側で行う（生ログを手元に持ってこない）。
-func printAnalysis(c *summary.Client, id string, asJSON bool) error {
+func printAnalysis(c *client.Client, id string, asJSON bool) error {
 	body, err := c.Content("analysis", id)
 	if err != nil {
 		return err
@@ -309,7 +310,7 @@ func printAnalysis(c *summary.Client, id string, asJSON bool) error {
 	return nil
 }
 
-func fetchAnalysis(c *summary.Client, id string) (*analysis.Report, error) {
+func fetchAnalysis(c *client.Client, id string) (*analysis.Report, error) {
 	body, err := c.Content("analysis", id)
 	if err != nil {
 		return nil, err
@@ -321,7 +322,7 @@ func fetchAnalysis(c *summary.Client, id string) (*analysis.Report, error) {
 	return rep, nil
 }
 
-func printGroups(c *summary.Client, asJSON bool) error {
+func printGroups(c *client.Client, asJSON bool) error {
 	entries, err := c.AllEntries()
 	if err != nil {
 		return err
@@ -334,7 +335,7 @@ func printGroups(c *summary.Client, asJSON bool) error {
 		Types   int
 	}
 	rows := []row{}
-	for _, id := range summary.GroupIDs(entries) {
+	for _, id := range client.GroupIDs(entries) {
 		r := row{GroupId: id}
 		for _, e := range entries {
 			if e.Snapshot.GroupId != id {
@@ -367,13 +368,13 @@ func printGroups(c *summary.Client, asJSON bool) error {
 
 // collect は収集を開始し、新しい GroupId が現れて全エントリが確定するまで待つ。
 // 「Duration 秒待ってからステータスを確認する」を手でやらずに済ませる。
-func collect(c *summary.Client, topN int, asJSON, wait bool, timeout time.Duration) error {
+func collect(c *client.Client, topN int, asJSON, wait bool, timeout time.Duration) error {
 	before, err := c.AllEntries()
 	if err != nil {
 		return err
 	}
 	known := map[string]bool{}
-	for _, id := range summary.GroupIDs(before) {
+	for _, id := range client.GroupIDs(before) {
 		known[id] = true
 	}
 
@@ -394,7 +395,7 @@ func collect(c *summary.Client, topN int, asJSON, wait bool, timeout time.Durati
 			continue
 		}
 		newID := ""
-		for _, id := range summary.GroupIDs(entries) {
+		for _, id := range client.GroupIDs(entries) {
 			if !known[id] {
 				newID = id
 				break
@@ -423,7 +424,7 @@ func collect(c *summary.Client, topN int, asJSON, wait bool, timeout time.Durati
 
 // waitGroup は収集グループの httplog / dbquery に pending が無くなるまで待つ。
 // 走行直後の analyze が、収集中の httplog を飛ばした空の集計を出すのを避ける。
-func waitGroup(c *summary.Client, id string, timeout time.Duration) (string, error) {
+func waitGroup(c *client.Client, id string, timeout time.Duration) (string, error) {
 	if id == "latest" {
 		latest, err := analysis.LatestGroup(c)
 		if err != nil {

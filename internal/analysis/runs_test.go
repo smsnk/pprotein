@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
-	"github.com/smsnk/pprotein/internal/summary"
 )
 
-func idxEntry(typ, id, gid, status string) summary.Entry {
-	e := summary.Entry{Status: status}
+func idxEntry(typ, id, gid, status string) client.Entry {
+	e := client.Entry{Status: status}
 	e.Snapshot.Type, e.Snapshot.ID, e.Snapshot.GroupId = typ, id, gid
 	return e
 }

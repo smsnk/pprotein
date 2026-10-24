@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/summary"
 )
 
@@ -78,11 +79,11 @@ const (
 // 集計は summary パッケージ（CLI と同じ経路）を使う。自分自身の API を叩くので、
 // alp / pt-query-digest の結果はサーバー側のキャッシュがそのまま効く。
 type Handler struct {
-	client *summary.Client
+	client *client.Client
 }
 
 func NewHandler(selfURL string) *Handler {
-	return &Handler{client: summary.NewClient(selfURL)}
+	return &Handler{client: client.New(selfURL)}
 }
 
 func (h *Handler) RegisterHandlers(g *echo.Group) {
@@ -98,7 +99,7 @@ func (h *Handler) getTrend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to list entries: %v", err))
 	}
 
-	ids := summary.GroupIDs(entries) // 新しい順
+	ids := client.GroupIDs(entries) // 新しい順
 	if len(ids) > limit {
 		ids = ids[:limit]
 	}
