@@ -40,6 +40,8 @@ type fakeAPI struct {
 	settle int
 	// down なら一覧を 500 にする
 	down bool
+	// query は一覧以外の最後の要求のクエリ
+	query string
 }
 
 // newFake は older（確定。summary に節の無い ptqd だけ失敗）と newer（全部失敗）の2つの収集を持つ。
@@ -86,6 +88,7 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(list)
 		return
 	}
+	f.query = r.URL.RawQuery
 	body, ok := f.bodies[r.URL.Path]
 	if !ok {
 		http.NotFound(w, r)
@@ -265,5 +268,21 @@ func TestCollectGivesUpWhenServerIsDown(t *testing.T) {
 	_, _, err := run(t, f, "collect")
 	if err == nil || !strings.Contains(err.Error(), "収集の状態を読めません") {
 		t.Errorf("err = %v", err)
+	}
+}
+
+// sessions の --limit はサーバーに切らせ、絞り込んだ数（Matched）と残りの件数を出す
+func TestSessionsLetServerCut(t *testing.T) {
+	f := newFake()
+	f.bodies["/api/analysis/"+older+"/sessions"] = `{"GroupId":"` + older + `","Total":3,"Matched":2,"Sessions":[{"ID":"s001"}]}`
+	out, _, err := run(t, f, "analyze", "sessions", older, "--limit", "1", "--lifecycle", "viewer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.query != "lifecycle=viewer&limit=1" {
+		t.Errorf("query = %q", f.query)
+	}
+	if !strings.Contains(out, "（2 / 全 3 セッション）") || !strings.Contains(out, "（残り 1 件は --limit で増やす）") {
+		t.Errorf("stdout:\n%s", out)
 	}
 }

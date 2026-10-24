@@ -11,7 +11,7 @@ pprotein-cli analyze transitions [GROUP] [flags]
 ```
   -h, --help               help for transitions
       --lifecycle string   そのライフサイクルに入ったセッションに絞る
-      --limit int          出す遷移の数（1 以上） (default 30)
+      --limit int          出す遷移の数（0 で全部） (default 30)
 ```
 
 ### Options inherited from parent commands

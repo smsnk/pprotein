@@ -54,7 +54,7 @@ observer に置いてもよいし、手元から API 越しに叩いてもよい
 | --- | --- | --- |
 | `--url` / `--json` / `--timeout D` | 全部 | 接続先 / JSON で出す / API の応答と完了待ちの上限（既定 5m） |
 | `--top N` | `summary`、`summary diff`、`collect`、`analyze diff` | 各表の行数（既定 10、0 で全部）。`analyze diff` はエンドポイント構成比の表だけ |
-| `--limit N` | `groups`、`analyze trend`、`analyze sessions`、`analyze transitions` | 出す収集・走行・セッション・遷移の数（`--json` にも効く）。`groups` と `analyze sessions` は 0 で全部、`analyze trend` は 1〜100 |
+| `--limit N` | `groups`、`analyze trend`、`analyze sessions`、`analyze transitions` | 出す収集・走行・セッション・遷移の数（`--json` にも効く）。0 で全部（`analyze trend` は最大 100） |
 | `--wait` | `summary`、`analyze` | その収集のうち、そのコマンドが読むエントリが確定するまで待ってから出す（`collect` は全部のタイプを待つ） |
 | `--no-wait` | `collect` | 収集を開始するだけで、完了を待たない |
 | `--lifecycle NAME` | `analyze sessions`、`analyze transitions` | そのライフサイクルに入ったセッションに絞る |

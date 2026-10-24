@@ -47,9 +47,9 @@ ISUCON では alp の上位がスコアに1点も寄与しないことが普通�
 
 | 読み込み口 | 内容 |
 | --- | --- |
-| `GET /api/analysis/<GroupId>/sessions[?lifecycle=<name>]` / `pprotein-cli analyze sessions <GroupId>` | セッションの一覧 |
+| `GET /api/analysis/<GroupId>/sessions[?lifecycle=<name>&limit=N]` / `pprotein-cli analyze sessions <GroupId>` | セッションの一覧（limit が無いか 0 なら全部）。`Total` は全セッション、`Matched` は lifecycle で絞ったあとの数（limit で切る前） |
 | `GET /api/analysis/<GroupId>/sessions/<ID>` / `pprotein-cli analyze session <GroupId> <ID>` | 1セッションの要求の列（まとめる前の URI・host・ステータス・応答時間・進んだ状態） |
-| `GET /api/analysis/<GroupId>/transitions[?lifecycle=<name>&top=N]` / `pprotein-cli analyze transitions <GroupId>` | よくある遷移 |
+| `GET /api/analysis/<GroupId>/transitions[?lifecycle=<name>&top=N]` / `pprotein-cli analyze transitions <GroupId>` | よくある遷移（top の既定は 30、0 なら全部） |
 
 - セッションは `httplog.entity_key`（cookie など）で束ねた利用者。対象は `source: httplog` のライフサイクルだけ
 - セッションの ID は開始時刻順の連番（`s001`, `s002`, …）。同じ材料なら同じ番号になる
@@ -63,11 +63,11 @@ Markdown は人が端末で読むためのもの。エージェントやスク�
 | 読み込み口 | 内容 | 大きさの目安（ISUCON13 の1走行） |
 | --- | --- | --- |
 | `GET /api/analysis/<GroupId>`（`latest` 可）/ `pprotein-cli analyze <GroupId> --json` | 1走行の全部 | 7.6KB |
-| `GET /api/analysis?limit=N` / `pprotein-cli analyze trend --limit N --json` | 走行ごとの要約（古い順） | 1走行あたり約 2KB |
+| `GET /api/analysis?limit=N` / `pprotein-cli analyze trend --limit N --json` | 走行ごとの要約（古い順。limit の既定は 20、0 なら全部で最大 100） | 1走行あたり約 2KB |
 | `GET /api/analysis?limit=N&endpoints=1` | 走行ごとの要約に、全エンドポイントの集計（`Endpoints`）を足したもの | 1走行あたり約 5KB |
 | `GET /api/analysis/<GroupId>/endpoints` | 全エンドポイントの区間ごとの件数・p50・p99・エラー・499 | 約 9KB |
 | `pprotein-cli analyze endpoints <GroupId> [--json]` | 全エンドポイントの走行全体の集計（`Report.EndpointStats`） | |
-| `pprotein-cli analyze diff <A> <B> --json` | 2走行の比較 | 6.9KB |
+| `GET /api/analysis/diff?before=<A>&after=<B>[&top=N]` / `pprotein-cli analyze diff <A> <B> --json` | 2走行の比較（top はエンドポイント構成比の行数。既定は 10、0 なら全部） | 6.9KB |
 
 ドキュメントを読まなくても解釈できるようにしてある。
 
@@ -76,7 +76,7 @@ Markdown は人が端末で読むためのもの。エージェントやスク�
   `penalty`（得点を減らすもの）。`Query` は元の dbquery の name（ライフサイクルの開始・完了数は `lifecycle:<name>`）
 - **時系列は列ごとの配列。** `Timeline.OffsetSec` と同じ並びで、`Requests` / `P99Sec` / `Series[].Values` /
   `Endpoints[].Values` が並ぶ。系列の値が無い区間は `null`
-- 秒はミリ秒、割合は 0.01% の単位に丸めてある（比較のエンドポイント構成比 `ShareBefore` / `ShareAfter` は丸めていない）
+- 秒はミリ秒、割合は 0.01% の単位に丸めてある
 - `Commit` はアプリのコミット（httplog に記録されたもの）、`ConfigHash` は集計に使った設定のハッシュ
 - `Score` はベンチのスコア（`Value` / `Passed`）。ベンチの実行スクリプトが送っていれば、エラー件数 `ErrorCount`・走行の対象ホスト `Target`・走行時間 `DurationSec` も入る（[score.md](score.md)）
 

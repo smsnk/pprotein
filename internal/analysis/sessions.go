@@ -6,7 +6,6 @@ import (
 	"math"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/labstack/echo/v4"
@@ -31,8 +30,9 @@ type (
 		GroupId string
 		// Lifecycles は source: httplog のライフサイクルと状態名（Sessions[].Lifecycles の並び）。
 		Lifecycles []LifecycleSteps
-		// Total はセッションの総数（lifecycle で絞る前）。
+		// Total はセッションの総数（lifecycle で絞る前）、Matched は lifecycle で絞ったあとの数（limit で切る前）。
 		Total    int
+		Matched  int
 		Sessions []SessionSummary
 	}
 
@@ -214,7 +214,7 @@ func (d *sessionData) inLifecycle(name string) bool {
 	return false
 }
 
-func (idx *sessionIndex) list(lifecycle string) *SessionsResponse {
+func (idx *sessionIndex) list(lifecycle string, limit int) *SessionsResponse {
 	resp := &SessionsResponse{GroupId: idx.groupId, Total: len(idx.order), Sessions: []SessionSummary{}}
 	for _, l := range idx.lifecycles {
 		ls := LifecycleSteps{Name: l.Name}
@@ -228,6 +228,10 @@ func (idx *sessionIndex) list(lifecycle string) *SessionsResponse {
 		if d.inLifecycle(lifecycle) {
 			resp.Sessions = append(resp.Sessions, d.summary)
 		}
+	}
+	resp.Matched = len(resp.Sessions)
+	if limit > 0 && len(resp.Sessions) > limit {
+		resp.Sessions = resp.Sessions[:limit]
 	}
 	return resp
 }
@@ -353,13 +357,13 @@ func (h *Handler) sessionIndexFor(c echo.Context) (*sessionIndex, error) {
 	return idx, nil
 }
 
-// getSessions は GET /api/analysis/:id/sessions[?lifecycle=<name>]。
+// getSessions は GET /api/analysis/:id/sessions[?lifecycle=<name>&limit=N]。limit が無いか 0 なら全部。
 func (h *Handler) getSessions(c echo.Context) error {
 	idx, err := h.sessionIndexFor(c)
 	if err != nil {
 		return err
 	}
-	return compactJSON(c, idx.list(c.QueryParam("lifecycle")))
+	return compactJSON(c, idx.list(c.QueryParam("lifecycle"), intParam(c, "limit", 0)))
 }
 
 // getSession は GET /api/analysis/:id/sessions/:sid。
@@ -370,40 +374,31 @@ func (h *Handler) getSession(c echo.Context) error {
 	}
 	d, ok := idx.detail(c.Param("sid"))
 	if !ok {
-		return echo.NewHTTPError(http.StatusNotFound, "no such session")
+		return echo.NewHTTPError(http.StatusNotFound, "そのセッションは無い")
 	}
 	return compactJSON(c, d)
 }
 
-// getTransitions は GET /api/analysis/:id/transitions[?lifecycle=<name>&top=N]。
+// getTransitions は GET /api/analysis/:id/transitions[?lifecycle=<name>&top=N]。top が無ければ 30、0 なら全部。
 func (h *Handler) getTransitions(c echo.Context) error {
 	idx, err := h.sessionIndexFor(c)
 	if err != nil {
 		return err
 	}
-	top := 30
-	if v, err := strconv.Atoi(c.QueryParam("top")); err == nil && v > 0 {
-		top = v
-	}
-	return compactJSON(c, idx.transitions(c.QueryParam("lifecycle"), top))
+	return compactJSON(c, idx.transitions(c.QueryParam("lifecycle"), intParam(c, "top", 30)))
 }
 
 // --- Markdown（CLI） ---
 
-// RenderSessionsMarkdown はセッションを limit 件まで表にする（0 なら全部）。
-func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, limit int) {
-	fmt.Fprintf(w, "# analyze sessions %s（%d / 全 %d セッション）\n\n", s.GroupId, len(s.Sessions), s.Total)
+func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse) {
+	fmt.Fprintf(w, "# analyze sessions %s（%d / 全 %d セッション）\n\n", s.GroupId, s.Matched, s.Total)
 	head := []string{"ID", "開始", "終了", "req", "エラー", "499", "最大応答", "host"}
 	for _, l := range s.Lifecycles {
 		head = append(head, l.Name)
 	}
 	md.Row(w, head)
 	md.Sep(w, len(head))
-	for i, x := range s.Sessions {
-		if limit > 0 && i >= limit {
-			fmt.Fprintf(w, "\n（残り %d 件は --limit で増やす）\n", len(s.Sessions)-limit)
-			break
-		}
+	for _, x := range s.Sessions {
 		row := []string{x.ID, fmt.Sprintf("%.1fs", x.StartSec), fmt.Sprintf("%.1fs", x.EndSec),
 			md.Int(x.Requests), md.Int(x.Errors), md.Int(x.S499), md.Sec(x.MaxReqSec), strings.Join(x.Hosts, " ")}
 		for _, r := range x.Lifecycles {
@@ -414,6 +409,9 @@ func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, limit int) {
 			}
 		}
 		md.Row(w, row)
+	}
+	if rest := s.Matched - len(s.Sessions); rest > 0 {
+		fmt.Fprintf(w, "\n（残り %d 件は --limit で増やす）\n", rest)
 	}
 	fmt.Fprintln(w)
 }

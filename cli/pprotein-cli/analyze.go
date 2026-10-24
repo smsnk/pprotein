@@ -102,7 +102,7 @@ func newAnalyzeTrendCmd(o *options) *cobra.Command {
 			return o.output(cmd, resp, func(w io.Writer) { analysis.RenderRunsMarkdown(w, resp) })
 		},
 	}
-	cmd.Flags().IntVar(&limit, "limit", 20, "遡る走行の数（1〜100）")
+	cmd.Flags().IntVar(&limit, "limit", 20, "遡る走行の数（0 で全部。最大 100）")
 	return cmd
 }
 
@@ -144,16 +144,13 @@ func newSessionsCmd(o *options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			q := lifecycleQuery(lifecycle)
+			q.Set("limit", strconv.Itoa(limit))
 			resp := &analysis.SessionsResponse{}
-			if err := getJSON(c, "/api/analysis/"+id+"/sessions", lifecycleQuery(lifecycle), resp); err != nil {
+			if err := getJSON(c, "/api/analysis/"+id+"/sessions", q, resp); err != nil {
 				return err
 			}
-			// Markdown は残りの件数を書くので、切り詰めるのは JSON だけ
-			shown := *resp
-			if limit > 0 && len(shown.Sessions) > limit {
-				shown.Sessions = shown.Sessions[:limit]
-			}
-			return o.output(cmd, shown, func(w io.Writer) { analysis.RenderSessionsMarkdown(w, resp, limit) })
+			return o.output(cmd, resp, func(w io.Writer) { analysis.RenderSessionsMarkdown(w, resp) })
 		},
 	}
 	cmd.Flags().StringVar(&lifecycle, "lifecycle", "", "そのライフサイクルに入ったセッションに絞る")
@@ -204,7 +201,7 @@ func newTransitionsCmd(o *options) *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&lifecycle, "lifecycle", "", "そのライフサイクルに入ったセッションに絞る")
-	cmd.Flags().IntVar(&limit, "limit", 30, "出す遷移の数（1 以上）")
+	cmd.Flags().IntVar(&limit, "limit", 30, "出す遷移の数（0 で全部）")
 	return cmd
 }
 

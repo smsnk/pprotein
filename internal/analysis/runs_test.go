@@ -3,10 +3,13 @@ package analysis
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
 
+	"github.com/labstack/echo/v4"
 	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
 	"github.com/smsnk/pprotein/internal/git"
@@ -133,5 +136,15 @@ func TestMemoEvictsOldest(t *testing.T) {
 	m.put(strconv.Itoa(memoLimit+4), 0)
 	if len(m.order) != memoLimit {
 		t.Errorf("re-put grew the order: %d", len(m.order))
+	}
+}
+
+// limit / top は、無い・壊れている・負なら既定値。0 は「全部」として呼び出し側に渡す
+func TestIntParam(t *testing.T) {
+	for q, want := range map[string]int{"": 7, "?n=0": 0, "?n=5": 5, "?n=-1": 7, "?n=x": 7} {
+		c := echo.New().NewContext(httptest.NewRequest(http.MethodGet, "/"+q, nil), httptest.NewRecorder())
+		if got := intParam(c, "n", 7); got != want {
+			t.Errorf("%q: %d, want %d", q, got, want)
+		}
 	}
 }

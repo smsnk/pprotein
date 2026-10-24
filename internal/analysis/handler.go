@@ -32,7 +32,7 @@ type Handler struct {
 func NewHandler(selfURL string, store storage.Storage) (*Handler, error) {
 	config, err := persistent.New(store, "analysis.yml", defaultConfig, sanitize)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create config: %w", err)
+		return nil, fmt.Errorf("analysis.yml を用意できません: %w", err)
 	}
 	return &Handler{client: client.New(selfURL), config: config, cache: newMemo[*Report](), sessions: newMemo[*sessionIndex](), endpoints: newMemo[*EndpointTimeline]()}, nil
 }
@@ -107,7 +107,7 @@ func LatestGroup(api *client.Client) (string, error) {
 func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 	origin, err := time.ParseInLocation(dbquery.GroupIdLayout, groupId, time.Local)
 	if err != nil {
-		return nil, fmt.Errorf("GroupId is not a time: %w", err)
+		return nil, fmt.Errorf("GroupId が時刻の形ではない: %w", err)
 	}
 	in := &Input{
 		GroupId: groupId,
@@ -117,7 +117,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 
 	alpConfig, err := api.Config("httplog")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read alp config: %w", err)
+		return nil, fmt.Errorf("alp の設定を読めません: %w", err)
 	}
 	norm, err := NewNormalizer(alpConfig)
 	if err != nil {
@@ -162,7 +162,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 			}
 			res := &dbquery.Result{}
 			if err := json.Unmarshal([]byte(body), res); err != nil {
-				return nil, fmt.Errorf("failed to parse dbquery result: %w", err)
+				return nil, fmt.Errorf("dbquery の結果を読めません: %w", err)
 			}
 			for i := range res.Queries {
 				in.Queries[res.Queries[i].Name] = &res.Queries[i]
@@ -183,7 +183,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 
 	// 収集中・失敗しか無いときは、空の集計に警告を付けて返す（エラーの本文は CLI で切り詰められるため）。
 	if !found && len(in.Warnings) == 0 {
-		return nil, fmt.Errorf("group %s has neither httplog nor dbquery", groupId)
+		return nil, fmt.Errorf("収集 %s には httplog も dbquery も無い", groupId)
 	}
 	return in, nil
 }

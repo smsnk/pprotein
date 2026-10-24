@@ -193,9 +193,10 @@ func (h *Handler) getRuns(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	limit := defaultRunsLimit
-	if v, err := strconv.Atoi(c.QueryParam("limit")); err == nil && v > 0 {
-		limit = min(v, maxRunsLimit)
+	// 0 は全部。ただし1回に集計するのは maxRunsLimit 走行まで（observer のメモリ）
+	limit := intParam(c, "limit", defaultRunsLimit)
+	if limit == 0 || limit > maxRunsLimit {
+		limit = maxRunsLimit
 	}
 
 	withEndpoints := c.QueryParam("endpoints") == "1"
@@ -233,17 +234,14 @@ func (h *Handler) getRuns(c echo.Context) error {
 	return compactJSON(c, resp)
 }
 
-// getDiff は GET /api/analysis/diff?before=<GroupId>&after=<GroupId>[&top=N]。
+// getDiff は GET /api/analysis/diff?before=<GroupId>&after=<GroupId>[&top=N]。top が無ければ 10、0 なら全部。
 // pprotein-cli analyze diff --json と同じものを返す（UI の比較画面が使う）。
 func (h *Handler) getDiff(c echo.Context) error {
 	before, after := c.QueryParam("before"), c.QueryParam("after")
 	if before == "" || after == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "before and after are required")
+		return echo.NewHTTPError(http.StatusBadRequest, "before と after を指定する")
 	}
-	top := defaultTop
-	if v, err := strconv.Atoi(c.QueryParam("top")); err == nil && v > 0 {
-		top = v
-	}
+	top := intParam(c, "top", defaultTop)
 	cfg, raw, err := h.loadConfig()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -261,6 +259,15 @@ func (h *Handler) getDiff(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 	return compactJSON(c, Compare(b, a, top))
+}
+
+// intParam はクエリの整数を返す。無い・数でない・負なら def。0 は「全部」の意味で使う。
+func intParam(c echo.Context, key string, def int) int {
+	v, err := strconv.Atoi(c.QueryParam(key))
+	if err != nil || v < 0 {
+		return def
+	}
+	return v
 }
 
 func hashConfig(raw []byte) string {

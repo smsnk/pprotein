@@ -143,6 +143,13 @@ func TestCompareEndpointsByShare(t *testing.T) {
 	if d.Endpoints[0].Key != "GET /icon" || d.Endpoints[0].ShareAfter != 0.4 {
 		t.Errorf("first = %+v", d.Endpoints[0])
 	}
+	// 割合はほかと同じく 0.01% の単位に丸める
+	if e := compareEndpoints(map[string]int{"a": 1, "b": 2}, map[string]int{"a": 1, "b": 2}, 0); e[0].ShareBefore != 0.3333 {
+		t.Errorf("ShareBefore = %v", e[0].ShareBefore)
+	}
+	if got := topShare([]float64{0.0001, 0.0185, 0.0101}, 3); got != 0.0287 {
+		t.Errorf("topShare = %v", got)
+	}
 }
 
 func TestCompareLifecyclesAlignsStepsByName(t *testing.T) {

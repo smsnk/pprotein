@@ -10,7 +10,7 @@ pprotein-cli analyze trend [flags]
 
 ```
   -h, --help        help for trend
-      --limit int   遡る走行の数（1〜100） (default 20)
+      --limit int   遡る走行の数（0 で全部。最大 100） (default 20)
 ```
 
 ### Options inherited from parent commands

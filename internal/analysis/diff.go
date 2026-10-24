@@ -199,11 +199,12 @@ func compareEndpoints(before, after map[string]int, top int) []EndpointDiff {
 	out := []EndpointDiff{}
 	for k := range keys {
 		e := EndpointDiff{Key: k, CountBefore: before[k], CountAfter: after[k]}
+		// ほかの割合と同じく 0.01% の単位に丸める
 		if tb > 0 {
-			e.ShareBefore = float64(e.CountBefore) / float64(tb)
+			e.ShareBefore = math.Round(float64(e.CountBefore)/float64(tb)*1e4) / 1e4
 		}
 		if ta > 0 {
-			e.ShareAfter = float64(e.CountAfter) / float64(ta)
+			e.ShareAfter = math.Round(float64(e.CountAfter)/float64(ta)*1e4) / 1e4
 		}
 		out = append(out, e)
 	}
@@ -502,12 +503,13 @@ func hasKeyValue(b *BreakdownResult) bool {
 	return b.Error == "" && colIndex(b.Columns, "key") >= 0 && colIndex(b.Columns, "value") >= 0
 }
 
+// topShare は上位 n 件の構成比の合計。ほかの割合と同じく 0.01% の単位に丸める（足すと誤差が出る）。
 func topShare(share []float64, n int) float64 {
 	var s float64
 	for i := 0; i < n && i < len(share); i++ {
 		s += share[i]
 	}
-	return s
+	return math.Round(s*1e4) / 1e4
 }
 
 // relChange は並べ替え用の変化の大きさ。before が 0 なら after が 0 でない限り最大にする。
