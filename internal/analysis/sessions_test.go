@@ -1,6 +1,7 @@
 package analysis
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func TestSessionListAndFilter(t *testing.T) {
 	cfg, in := sessionInput()
 	idx := buildSessionIndex(cfg, in)
 
-	all := idx.list("")
+	all := idx.list("", 0)
 	if all.Total != 3 || len(all.Sessions) != 3 {
 		t.Fatalf("all = %+v", all)
 	}
@@ -59,8 +60,18 @@ func TestSessionListAndFilter(t *testing.T) {
 		t.Errorf("hosts = %v", a.Hosts)
 	}
 
-	if v := idx.list("viewer"); len(v.Sessions) != 2 || v.Total != 3 {
+	if v := idx.list("viewer", 0); len(v.Sessions) != 2 || v.Total != 3 || v.Matched != 2 {
 		t.Errorf("viewer = %+v", v)
+	}
+	// limit で切っても、絞り込んだ数（Matched）は残る
+	v := idx.list("viewer", 1)
+	if len(v.Sessions) != 1 || v.Matched != 2 {
+		t.Errorf("viewer limit 1 = %+v", v)
+	}
+	var buf bytes.Buffer
+	RenderSessionsMarkdown(&buf, v)
+	if !strings.Contains(buf.String(), "（2 / 全 3 セッション）") || !strings.Contains(buf.String(), "（残り 1 件は --limit で増やす）") {
+		t.Errorf("markdown:\n%s", buf.String())
 	}
 }
 

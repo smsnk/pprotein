@@ -94,7 +94,7 @@ const sourceQueryPrefix = "query:"
 func ParseConfig(raw []byte) (*Config, error) {
 	cfg := &Config{}
 	if err := yaml.Unmarshal(raw, cfg); err != nil {
-		return nil, fmt.Errorf("failed to parse analysis config: %w", err)
+		return nil, fmt.Errorf("analysis.yml を読めません: %w", err)
 	}
 	if cfg.Bucket <= 0 {
 		cfg.Bucket = defaultBucket
@@ -105,42 +105,42 @@ func ParseConfig(raw []byte) (*Config, error) {
 	for i := range cfg.Series {
 		s := &cfg.Series[i]
 		if s.Name == "" || s.Query == "" {
-			return nil, fmt.Errorf("series needs both name and query: %+v", *s)
+			return nil, fmt.Errorf("series には name と query が要る: %+v", *s)
 		}
 		switch s.Role {
 		case "", "score", "driver", "penalty":
 		default:
-			return nil, fmt.Errorf("series %s: role must be score, driver or penalty: %q", s.Name, s.Role)
+			return nil, fmt.Errorf("series %s: role は score / driver / penalty のどれか: %q", s.Name, s.Role)
 		}
 		switch s.Agg {
 		case "":
 			s.Agg = "sum"
 		case "sum", "count", "max", "last":
 		default:
-			return nil, fmt.Errorf("series %s: unknown agg %q", s.Name, s.Agg)
+			return nil, fmt.Errorf("series %s: agg は sum / count / max / last のどれか: %q", s.Name, s.Agg)
 		}
 	}
 	for _, b := range cfg.Breakdowns {
 		if b.Name == "" || b.Query == "" {
-			return nil, fmt.Errorf("breakdown needs both name and query: %+v", b)
+			return nil, fmt.Errorf("breakdowns には name と query が要る: %+v", b)
 		}
 	}
 	for i := range cfg.Lifecycles {
 		l := &cfg.Lifecycles[i]
 		if l.Name == "" || len(l.Steps) == 0 {
-			return nil, fmt.Errorf("lifecycle needs name and steps: %+v", *l)
+			return nil, fmt.Errorf("lifecycles には name と steps が要る: %+v", *l)
 		}
 		if l.Source != "httplog" && !strings.HasPrefix(l.Source, sourceQueryPrefix) {
-			return nil, fmt.Errorf("lifecycle %s: source must be httplog or query:<name>", l.Name)
+			return nil, fmt.Errorf("lifecycle %s: source は httplog か query:<name>", l.Name)
 		}
 		if l.Source == "httplog" && cfg.HTTPLog.EntityKey == "" {
-			return nil, fmt.Errorf("lifecycle %s: httplog.entity_key is required for source httplog", l.Name)
+			return nil, fmt.Errorf("lifecycle %s: source が httplog なら httplog.entity_key が要る", l.Name)
 		}
 		for j := range l.Steps {
 			st := &l.Steps[j]
 			re, err := regexp.Compile(st.Match)
 			if err != nil {
-				return nil, fmt.Errorf("lifecycle %s step %s: %w", l.Name, st.Name, err)
+				return nil, fmt.Errorf("lifecycle %s の状態 %s: %w", l.Name, st.Name, err)
 			}
 			st.re = re
 			if st.Name == "" {

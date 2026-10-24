@@ -2,8 +2,13 @@ package summary
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
+
+	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/md"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 // Markdown は Group を Markdown にする。
@@ -11,54 +16,45 @@ import (
 func (g *Group) Markdown() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# group %s\n\n", g.ID)
+	fmt.Fprintf(&b, "# summary %s\n\n", g.GroupId)
 	if !g.Datetime.IsZero() {
-		fmt.Fprintf(&b, "- collected: %s\n", g.Datetime.Format("2006-01-02 15:04:05"))
-	}
-	if g.Repository != nil {
-		fmt.Fprintf(&b, "- commit: %s %q (%s)\n",
-			shortHash(g.Repository.Hash), firstLine(g.Repository.Message), g.Repository.Ref)
+		fmt.Fprintf(&b, "- 収集: %s\n", g.Datetime.Format("2006-01-02 15:04:05"))
 	}
 	if g.Score != nil {
-		fmt.Fprintf(&b, "- score: %s\n", g.Score.Summary())
+		fmt.Fprintf(&b, "- スコア: %s\n", g.Score.Line())
 	}
-	if len(g.Pending) > 0 {
-		fmt.Fprintf(&b, "- **収集中**: %s\n", strings.Join(g.Pending, ", "))
+	if g.Commit != nil {
+		fmt.Fprintf(&b, "- コミット: %s\n", g.Commit)
 	}
-	if len(g.Failed) > 0 {
-		fmt.Fprintf(&b, "- **失敗**: %s\n", strings.Join(g.Failed, ", "))
-	}
+	md.Warnings(&b, g.Warnings)
 	b.WriteString("\n")
 
 	for _, s := range g.HTTPLog {
-		fmt.Fprintf(&b, "## httplog: %s (top %d by SUM)\n\n", s.Label, len(s.Endpoints))
-		b.WriteString("| COUNT | METHOD | URI | SUM | AVG | P99 |\n")
-		b.WriteString("| ---: | --- | --- | ---: | ---: | ---: |\n")
+		fmt.Fprintf(&b, "## httplog: %s（SUM の大きい順に %d 件）\n\n", s.Label, len(s.Endpoints))
+		md.Row(&b, []string{"COUNT", "METHOD", "URI", "SUM", "AVG", "P99"})
+		md.Sep(&b, 6)
 		for _, e := range s.Endpoints {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
-				num(e.Count), e.Method, e.Uri, num(e.Sum), num(e.Avg), num(e.P99))
+			md.Row(&b, []string{md.Num(e.Count), e.Method, e.Uri, md.Sec(e.Sum), md.Sec(e.Avg), md.Sec(e.P99)})
 		}
 		b.WriteString("\n")
 	}
 
 	for _, s := range g.SlowLog {
-		fmt.Fprintf(&b, "## slowlog: %s (top %d by total query time)\n\n", s.Label, len(s.Queries))
-		b.WriteString("| COUNT | SUM | AVG | ROWS EXAMINED (avg) | QUERY |\n")
-		b.WriteString("| ---: | ---: | ---: | ---: | --- |\n")
+		fmt.Fprintf(&b, "## slowlog: %s（合計時間の大きい順に %d 件）\n\n", s.Label, len(s.Queries))
+		md.Row(&b, []string{"COUNT", "SUM", "AVG", "ROWS EXAMINED (avg)", "QUERY"})
+		md.Sep(&b, 5)
 		for _, q := range s.Queries {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s |\n",
-				num(q.Count), num(q.Sum), num(q.Avg), num(q.RowsExamined), oneLine(q.Query))
+			md.Row(&b, []string{md.Num(q.Count), md.Sec(q.Sum), md.Sec(q.Avg), md.Num(q.RowsExamined), query(q.Query)})
 		}
 		b.WriteString("\n")
 	}
 
 	for _, s := range g.Profiles {
-		fmt.Fprintf(&b, "## pprof: %s (top %d by flat)\n\n", s.Label, len(s.Funcs))
-		b.WriteString("| FLAT | FLAT% | CUM | FUNCTION |\n")
-		b.WriteString("| ---: | ---: | ---: | --- |\n")
+		fmt.Fprintf(&b, "## pprof: %s（flat の大きい順に %d 件）\n\n", s.Label, len(s.Funcs))
+		md.Row(&b, []string{"FLAT", "FLAT%", "CUM", "FUNCTION"})
+		md.Sep(&b, 4)
 		for _, f := range s.Funcs {
-			fmt.Fprintf(&b, "| %s | %.1f%% | %s | %s |\n",
-				value(f.Flat, f.Unit), f.FlatPct, value(f.Cum, f.Unit), f.Name)
+			md.Row(&b, []string{value(f.Flat, f.Unit), md.Pct(f.FlatShare), value(f.Cum, f.Unit), f.Name})
 		}
 		b.WriteString("\n")
 	}
@@ -74,272 +70,235 @@ func (g *Group) Markdown() string {
 	return b.String()
 }
 
-// Diff は2つの Group の差分。
+// Diff は2つの収集の差分。
 type Diff struct {
-	Before, After *Group
-	Score         *ScoreDiff
-	Endpoints     []EndpointDiff
-	Queries       []QueryDiff
+	// Before / After は比べた収集の GroupId。
+	Before, After string
+	Score         *score.Diff `json:",omitempty"`
+	Commit        *git.Diff   `json:",omitempty"`
+	// Warnings は比較の前提が崩れているもの（片方の収集中・失敗のエントリなど）。
+	Warnings  []string `json:",omitempty"`
+	Endpoints []EndpointDiff
+	Queries   []QueryDiff
 }
 
-type ScoreDiff struct {
-	Before, After int64
+// RowDiff は before / after の同じ行（同じ label・同じキー）の組。
+// 片方にしか無い行（追加・削除）は、もう片方が nil。
+type RowDiff[T any] struct {
+	Label string
+	// Key は JSON に出さない（Before / After が持っている。SQL を何度も繰り返さない）
+	Key    string `json:"-"`
+	Before *T     `json:",omitempty"`
+	After  *T     `json:",omitempty"`
+	// Impact は件数を揃えたときの合計時間の増減。impact を参照。
+	Impact float64 `json:"ImpactSec"`
 }
 
-type EndpointDiff struct {
-	Label       string
-	Key         string
-	CountBefore float64
-	CountAfter  float64
-	SumBefore   float64
-	SumAfter    float64
-	AvgBefore   float64
-	AvgAfter    float64
+type (
+	EndpointDiff = RowDiff[Endpoint]
+	QueryDiff    = RowDiff[Query]
+)
+
+// row は diff で突き合わせる alp / slp の1行。
+type row interface {
+	Key() string
+	stats() (count, avg, sum float64)
 }
 
-type QueryDiff struct {
-	Label       string
-	Query       string
-	CountBefore float64
-	CountAfter  float64
-	SumBefore   float64
-	SumAfter    float64
-	AvgBefore   float64
-	AvgAfter    float64
+// stats の avg は SUM / COUNT から出す。alp の AVG は小数3桁に丸められていて、
+// 1〜5ms のエンドポイントでは IMPACT が件数 × 1ms の単位でしか動かない。
+func (e Endpoint) stats() (count, avg, sum float64) {
+	if e.Count == 0 {
+		return 0, e.Avg, e.Sum
+	}
+	return e.Count, e.Sum / e.Count, e.Sum
 }
 
-func (d EndpointDiff) SumDelta() float64   { return d.SumAfter - d.SumBefore }
-func (d EndpointDiff) CountDelta() float64 { return d.CountAfter - d.CountBefore }
-func (d EndpointDiff) AvgDelta() float64   { return d.AvgAfter - d.AvgBefore }
-func (d QueryDiff) SumDelta() float64      { return d.SumAfter - d.SumBefore }
-func (d QueryDiff) CountDelta() float64    { return d.CountAfter - d.CountBefore }
-func (d QueryDiff) AvgDelta() float64      { return d.AvgAfter - d.AvgBefore }
+// slp の AVG は小数6桁あるので、そのまま使う。
+func (q Query) stats() (count, avg, sum float64) { return q.Count, q.Avg, q.Sum }
 
-// Impact は「リクエスト数を揃えたとき、合計でどれだけ時間が増減したか」。
+// impact は「リクエスト数を揃えたとき、合計でどれだけ時間が増減したか」。
 //
 // ベンチが固定時間だと、速くしても空いた時間に次のリクエストが入るので
 // SUM はほとんど動かない（代わりに件数が増える）。SUM の増減で並べると
 // いちばん効いた施策が下に埋もれるので、1件あたりの増減に件数を掛けて順位を付ける。
-func (d EndpointDiff) Impact() float64 {
-	return impact(d.AvgDelta(), d.CountBefore, d.CountAfter)
-}
-func (d QueryDiff) Impact() float64 {
-	return impact(d.AvgDelta(), d.CountBefore, d.CountAfter)
+// 片方にしか無い行は、その SUM がまるごと増えた / 減ったものとして数える。
+func impact[T row](before, after *T) float64 {
+	switch {
+	case before == nil:
+		_, _, sum := (*after).stats()
+		return sum
+	case after == nil:
+		_, _, sum := (*before).stats()
+		return -sum
+	}
+	countBefore, avgBefore, _ := (*before).stats()
+	countAfter, avgAfter, _ := (*after).stats()
+	return (avgAfter - avgBefore) * (countBefore + countAfter) / 2
 }
 
-func impact(avgDelta, countBefore, countAfter float64) float64 {
-	n := (countBefore + countAfter) / 2
-	if n == 0 {
-		return 0
+// compareRows は label とキーで行を突き合わせ、IMPACT の大きい順に topN 件を返す。
+func compareRows[T row](before, after map[string][]T, topN int) []RowDiff[T] {
+	out := []RowDiff[T]{}
+	idx := map[[2]string]int{}
+	add := func(rows map[string][]T, isAfter bool) {
+		for label, rs := range rows {
+			for i := range rs {
+				k := [2]string{label, rs[i].Key()}
+				j, ok := idx[k]
+				if !ok {
+					j = len(out)
+					idx[k] = j
+					out = append(out, RowDiff[T]{Label: label, Key: k[1]})
+				}
+				if isAfter {
+					out[j].After = &rs[i]
+				} else {
+					out[j].Before = &rs[i]
+				}
+			}
+		}
 	}
-	return avgDelta * n
+	add(before, false)
+	add(after, true)
+
+	for i := range out {
+		// analysis と同じく秒はミリ秒に丸める（JSON に浮動小数の誤差を出さない）。+ 0 で -0 を 0 にする
+		out[i].Impact = math.Round(impact(out[i].Before, out[i].After)*1e3)/1e3 + 0
+	}
+	// 同じ IMPACT なら label・キーの順にして、実行ごとに並びが変わらないようにする
+	sort.Slice(out, func(i, j int) bool {
+		if a, b := math.Abs(out[i].Impact), math.Abs(out[j].Impact); a != b {
+			return a > b
+		}
+		if out[i].Label != out[j].Label {
+			return out[i].Label < out[j].Label
+		}
+		return out[i].Key < out[j].Key
+	})
+	return head(out, topN)
 }
 
 // Compare は before -> after のエンドポイント / クエリ単位の増減を出す。
-// 片方にしか無いものも「新規 / 消滅」として残す。
+// 片方にしか無いもの（label ごと無いものも）は追加 / 削除として残す。
 func Compare(before, after *Group, topN int) *Diff {
-	d := &Diff{Before: before, After: after}
-
-	if before.Score != nil && after.Score != nil {
-		d.Score = &ScoreDiff{Before: before.Score.Score, After: after.Score.Score}
+	d := &Diff{Before: before.GroupId, After: after.GroupId}
+	if before.Score != nil || after.Score != nil {
+		d.Score = &score.Diff{Before: before.Score, After: after.Score}
+	}
+	if before.Commit != nil || after.Commit != nil {
+		d.Commit = &git.Diff{Before: before.Commit, After: after.Commit}
+	}
+	for _, w := range before.Warnings {
+		d.Warnings = append(d.Warnings, "before: "+w)
+	}
+	for _, w := range after.Warnings {
+		d.Warnings = append(d.Warnings, "after: "+w)
 	}
 
-	for _, a := range after.HTTPLog {
-		bmap := map[string]Endpoint{}
-		for _, b := range before.HTTPLog {
-			if b.Label != a.Label {
-				continue
-			}
-			for _, e := range b.Endpoints {
-				bmap[e.Key()] = e
-			}
+	endpoints := func(g *Group) map[string][]Endpoint {
+		m := map[string][]Endpoint{}
+		for _, s := range g.HTTPLog {
+			m[s.Label] = append(m[s.Label], s.Endpoints...)
 		}
-		seen := map[string]bool{}
-		for _, e := range a.Endpoints {
-			prev := bmap[e.Key()]
-			seen[e.Key()] = true
-			d.Endpoints = append(d.Endpoints, EndpointDiff{
-				Label: a.Label, Key: e.Key(),
-				CountBefore: prev.Count, CountAfter: e.Count,
-				SumBefore: prev.Sum, SumAfter: e.Sum,
-				AvgBefore: prev.Avg, AvgAfter: e.Avg,
-			})
-		}
-		for key, e := range bmap {
-			if !seen[key] {
-				d.Endpoints = append(d.Endpoints, EndpointDiff{
-					Label: a.Label, Key: key,
-					CountBefore: e.Count, SumBefore: e.Sum, AvgBefore: e.Avg,
-				})
-			}
-		}
+		return m
 	}
-	sortByAbsDelta(d.Endpoints, func(e EndpointDiff) float64 { return e.Impact() })
-	d.Endpoints = head(d.Endpoints, topN)
-
-	for _, a := range after.SlowLog {
-		bmap := map[string]Query{}
-		for _, b := range before.SlowLog {
-			if b.Label != a.Label {
-				continue
-			}
-			for _, q := range b.Queries {
-				bmap[q.Key()] = q
-			}
+	queries := func(g *Group) map[string][]Query {
+		m := map[string][]Query{}
+		for _, s := range g.SlowLog {
+			m[s.Label] = append(m[s.Label], s.Queries...)
 		}
-		seen := map[string]bool{}
-		for _, q := range a.Queries {
-			prev := bmap[q.Key()]
-			seen[q.Key()] = true
-			d.Queries = append(d.Queries, QueryDiff{
-				Label: a.Label, Query: q.Query,
-				CountBefore: prev.Count, CountAfter: q.Count,
-				SumBefore: prev.Sum, SumAfter: q.Sum,
-				AvgBefore: prev.Avg, AvgAfter: q.Avg,
-			})
-		}
-		for key, q := range bmap {
-			if !seen[key] {
-				d.Queries = append(d.Queries, QueryDiff{
-					Label: a.Label, Query: key,
-					CountBefore: q.Count, SumBefore: q.Sum, AvgBefore: q.Avg,
-				})
-			}
-		}
+		return m
 	}
-	sortByAbsDelta(d.Queries, func(q QueryDiff) float64 { return q.Impact() })
-	d.Queries = head(d.Queries, topN)
-
+	d.Endpoints = compareRows(endpoints(before), endpoints(after), topN)
+	d.Queries = compareRows(queries(before), queries(after), topN)
 	return d
 }
 
 func (d *Diff) Markdown() string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "# diff %s -> %s\n\n", d.Before.ID, d.After.ID)
+	fmt.Fprintf(&b, "# summary diff %s -> %s\n\n", d.Before, d.After)
 	if d.Score != nil {
-		delta := d.Score.After - d.Score.Before
-		pct := ""
-		if d.Score.Before != 0 {
-			pct = fmt.Sprintf(", %+.1f%%", float64(delta)/float64(d.Score.Before)*100)
-		}
-		fmt.Fprintf(&b, "- score: %d -> %d (%+d%s)\n", d.Score.Before, d.Score.After, delta, pct)
+		fmt.Fprintf(&b, "- スコア: %s\n", d.Score)
 	}
-	for _, g := range []*Group{d.Before, d.After} {
-		if g.Repository != nil {
-			fmt.Fprintf(&b, "- %s: %s %q\n", g.ID, shortHash(g.Repository.Hash), firstLine(g.Repository.Message))
-		}
+	if d.Commit != nil {
+		fmt.Fprintf(&b, "- コミット: %s\n", d.Commit)
 	}
+	md.Warnings(&b, d.Warnings)
 	b.WriteString("\n")
 
 	if len(d.Endpoints) > 0 {
 		b.WriteString("## httplog（IMPACT の大きい順）\n\n")
-		b.WriteString("| LABEL | ENDPOINT | COUNT | AVG | SUM | IMPACT |\n")
-		b.WriteString("| --- | --- | ---: | ---: | ---: | ---: |\n")
+		md.Row(&b, []string{"LABEL", "ENDPOINT", "COUNT", "AVG", "SUM", "IMPACT"})
+		md.Sep(&b, 6)
 		for _, e := range d.Endpoints {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
-				e.Label, e.Key,
-				arrow(e.CountBefore, e.CountAfter),
-				arrow(e.AvgBefore, e.AvgAfter),
-				arrow(e.SumBefore, e.SumAfter),
-				signed(e.Impact()))
+			count, avg, sum := arrows(e)
+			md.Row(&b, []string{e.Label, e.Key, count, avg, sum, impactCell(e)})
 		}
 		b.WriteString("\n")
 	}
 
 	if len(d.Queries) > 0 {
 		b.WriteString("## slowlog（IMPACT の大きい順）\n\n")
-		b.WriteString("| LABEL | COUNT | AVG | SUM | IMPACT | QUERY |\n")
-		b.WriteString("| --- | ---: | ---: | ---: | ---: | --- |\n")
+		md.Row(&b, []string{"LABEL", "COUNT", "AVG", "SUM", "IMPACT", "QUERY"})
+		md.Sep(&b, 6)
 		for _, q := range d.Queries {
-			fmt.Fprintf(&b, "| %s | %s | %s | %s | %s | %s |\n",
-				q.Label,
-				arrow(q.CountBefore, q.CountAfter),
-				arrow(q.AvgBefore, q.AvgAfter),
-				arrow(q.SumBefore, q.SumAfter),
-				signed(q.Impact()), oneLine(q.Query))
+			count, avg, sum := arrows(q)
+			md.Row(&b, []string{q.Label, count, avg, sum, impactCell(q), query(q.Key)})
 		}
 		b.WriteString("\n")
 	}
 
 	if len(d.Endpoints) == 0 && len(d.Queries) == 0 {
-		b.WriteString("比較できる計測がありません（label が揃っているか確認してください）\n")
+		b.WriteString("比べられる httplog / slowlog がありません\n")
 	}
 
 	return b.String()
 }
 
-func sortByAbsDelta[T any](s []T, delta func(T) float64) {
-	sort.Slice(s, func(i, j int) bool { return abs(delta(s[i])) > abs(delta(s[j])) })
-}
-
-func abs(v float64) float64 {
-	if v < 0 {
-		return -v
+// arrows は COUNT / AVG / SUM の before → after を返す。片方にしか無ければ（なし）。
+func arrows[T row](d RowDiff[T]) (count, avg, sum string) {
+	cells := func(r *T) [3]string {
+		if r == nil {
+			return [3]string{"（なし）", "（なし）", "（なし）"}
+		}
+		c, a, s := (*r).stats()
+		return [3]string{md.Num(c), md.Sec(a), md.Sec(s)}
 	}
-	return v
+	b, a := cells(d.Before), cells(d.After)
+	return b[0] + " → " + a[0], b[1] + " → " + a[1], b[2] + " → " + a[2]
 }
 
-func num(v float64) string {
+func impactCell[T any](d RowDiff[T]) string {
+	cell := md.Signed(d.Impact, md.Sec)
 	switch {
-	case v == 0:
-		return "0"
-	case v >= 1000 || v == float64(int64(v)):
-		return fmt.Sprintf("%.0f", v)
-	default:
-		return fmt.Sprintf("%.3f", v)
+	case d.Before == nil:
+		return cell + "（追加）"
+	case d.After == nil:
+		return cell + "（削除）"
 	}
-}
-
-// arrow は before → after を1セルにまとめる。
-func arrow(before, after float64) string {
-	return num(before) + " → " + num(after)
-}
-
-func signed(v float64) string {
-	if v > 0 {
-		return "+" + num(v)
-	}
-	if v < 0 {
-		return "-" + num(-v)
-	}
-	return "0"
+	return cell
 }
 
 // value は pprof の値を単位付きで読みやすくする。
 func value(v float64, unit string) string {
-	if unit == "nanoseconds" {
-		switch {
-		case v >= 1e9:
-			return fmt.Sprintf("%.2fs", v/1e9)
-		case v >= 1e6:
-			return fmt.Sprintf("%.0fms", v/1e6)
-		default:
-			return fmt.Sprintf("%.0fus", v/1e3)
-		}
+	if unit != "seconds" {
+		return md.Num(v)
 	}
-	return num(v)
+	switch {
+	case v >= 1:
+		return fmt.Sprintf("%.2fs", v)
+	case v >= 1e-3:
+		return fmt.Sprintf("%.0fms", v*1e3)
+	default:
+		return fmt.Sprintf("%.0fus", v*1e6)
+	}
 }
 
-func shortHash(h string) string {
-	if len(h) > 7 {
-		return h[:7]
-	}
-	return h
-}
-
-func firstLine(s string) string {
-	return strings.TrimSpace(strings.SplitN(strings.TrimSpace(s), "\n", 2)[0])
-}
-
-// oneLine は Markdown の表に入れられるように潰す。
-func oneLine(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	s = strings.ReplaceAll(s, "|", "\\|")
-	if len(s) > 160 {
-		s = s[:160] + "…"
-	}
-	return s
+// query は SQL を表の1セルに収まるように1行に潰して切り詰める。
+func query(s string) string {
+	return md.Clip(strings.Join(strings.Fields(s), " "), 160)
 }
 
 func ensureNewline(s string) string {

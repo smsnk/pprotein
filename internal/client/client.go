@@ -1,17 +1,21 @@
-// Package summary は pprotein の API を叩いて計測結果を取り出し、
-// テキスト（Markdown）や JSON に整形する。CLI から使う。
-package summary
+// Package client は pprotein の HTTP API を読む。
+// CLI と、自分自身の API から材料を読むサーバー側の集計（analysis / trend）が使う。
+package client
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
+	"github.com/smsnk/pprotein/internal/dbquery"
 	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/md"
 	"github.com/smsnk/pprotein/internal/score"
 )
 
@@ -36,7 +40,7 @@ type Client struct {
 	HTTP    *http.Client
 }
 
-func NewClient(baseURL string) *Client {
+func New(baseURL string) *Client {
 	return &Client{
 		BaseURL: baseURL,
 		HTTP:    &http.Client{Timeout: 60 * time.Second},
@@ -51,7 +55,7 @@ func (c *Client) get(path string) ([]byte, error) {
 func (c *Client) GetQuery(path string, query url.Values) ([]byte, error) {
 	u, err := url.JoinPath(c.BaseURL, path)
 	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
+		return nil, fmt.Errorf("URL が正しくありません: %w", err)
 	}
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -59,18 +63,27 @@ func (c *Client) GetQuery(path string, query url.Values) ([]byte, error) {
 
 	resp, err := c.HTTP.Get(u)
 	if err != nil {
-		return nil, fmt.Errorf("failed to request %s: %w", u, err)
+		return nil, fmt.Errorf("%s を読めません: %w", u, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", u, err)
+		return nil, fmt.Errorf("%s の応答を読めません: %w", u, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http error: %s: status=%d body=%s", u, resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("%s が %d を返しました: %s", u, resp.StatusCode, errorMessage(body))
 	}
 	return body, nil
+}
+
+// errorMessage はエラー応答の本文から、人が読むメッセージを取り出す。echo のエラーは {"message": ...} の JSON。
+func errorMessage(body []byte) string {
+	var e struct{ Message string }
+	if json.Unmarshal(body, &e) == nil && e.Message != "" {
+		return e.Message
+	}
+	return md.Clip(strings.TrimSpace(string(body)), 200)
 }
 
 // Entries は指定した収集タイプのエントリ一覧を返す。
@@ -81,7 +94,7 @@ func (c *Client) Entries(typ string) ([]Entry, error) {
 	}
 	entries := []Entry{}
 	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal %s entries: %w", typ, err)
+		return nil, fmt.Errorf("%s の一覧を読めません: %w", typ, err)
 	}
 	return entries, nil
 }
@@ -110,7 +123,7 @@ func (c *Client) Score(id string) (*score.Value, error) {
 	}
 	v := &score.Value{}
 	if err := json.Unmarshal(body, v); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal score: %w", err)
+		return nil, fmt.Errorf("スコアを読めません: %w", err)
 	}
 	return v, nil
 }
@@ -121,17 +134,21 @@ func (c *Client) StartCollect() error {
 	return err
 }
 
-// CollectTypes は summary が読む収集タイプ。表示する順に並べてある。
-var CollectTypes = []string{"score", "httplog", "slowlog", "resource", "pprof", "memo"}
+// Types は pprotein の収集タイプ。
+var Types = []string{"score", "httplog", "slowlog", "ptqd", "resource", "pprof", "memo", "dbquery"}
 
 // AllEntries は全タイプのエントリをまとめて取る。
 // 収集タイプが存在しない（古い pprotein）場合はそのタイプを黙って飛ばす。
 func (c *Client) AllEntries() ([]Entry, error) {
 	var all []Entry
 	var firstErr error
-	for _, typ := range CollectTypes {
+	for _, typ := range Types {
 		entries, err := c.Entries(typ)
 		if err != nil {
+			// 繋がらない・応答が無いなら残りのタイプも同じ。タイムアウトをタイプの数だけ待たない
+			if errors.As(err, new(*url.Error)) {
+				return nil, err
+			}
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -143,6 +160,53 @@ func (c *Client) AllEntries() ([]Entry, error) {
 		return nil, firstErr
 	}
 	return all, nil
+}
+
+// Latest は最新の収集の GroupId を返す。収集中・失敗したものも含める。
+// 1つ前の走行を指すと、走行直後の収集中や新しい走行の失敗が前の走行の結果で隠れ、取り違えに気づけない。
+// GroupId の形でないもの（API に手で送ったスコアやメモ）は時刻の順に並ばないので除く。
+func Latest(entries []Entry) (string, error) {
+	for _, id := range GroupIDs(entries) {
+		if _, err := time.Parse(dbquery.GroupIdLayout, id); err == nil {
+			return id, nil
+		}
+	}
+	return "", errors.New("収集がありません")
+}
+
+// Newest は収集 groupId の typ のエントリのうち、確定した（ok の）いちばん新しいものを返す。無ければ nil。
+// ベンチを回し直してスコアや dbquery を送り直すと、同じ収集に複数できる。
+func Newest(entries []Entry, typ, groupId string) *Entry {
+	var newest *Entry
+	for i, e := range entries {
+		if e.Snapshot.Type != typ || e.Snapshot.GroupId != groupId || e.Status != "ok" {
+			continue
+		}
+		if newest == nil || e.Snapshot.Datetime.After(newest.Snapshot.Datetime) {
+			newest = &entries[i]
+		}
+	}
+	return newest
+}
+
+// Warning は確定していない（収集中・失敗の）エントリを警告文にする。確定していれば空。
+// 黙って飛ばすと、収集中の走行がリクエスト 0 件として読まれてしまう。
+func Warning(e Entry) string {
+	switch e.Status {
+	case "pending":
+		return e.Name() + " は収集中（pending）。この集計に含めていない。完了してから再実行する"
+	case "fail":
+		return fmt.Sprintf("%s は収集に失敗した（%s）。この集計に含めていない", e.Name(), e.Message)
+	}
+	return ""
+}
+
+// Name は警告などに出すエントリの名前（「httplog isu1」）。
+func (e Entry) Name() string {
+	if e.Snapshot.Label == "" {
+		return e.Snapshot.Type
+	}
+	return e.Snapshot.Type + " " + e.Snapshot.Label
 }
 
 // GroupIDs は新しい順の GroupId 一覧を返す。
@@ -159,11 +223,4 @@ func GroupIDs(entries []Entry) []string {
 	// GroupId は "YYYY-mm-dd_HH-MM-SS.ffffff" なので文字列比較で時系列に並ぶ
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	return ids
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

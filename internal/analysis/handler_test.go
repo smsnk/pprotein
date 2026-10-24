@@ -7,13 +7,13 @@ import (
 	"testing"
 
 	"github.com/goccy/go-json"
-	"github.com/smsnk/pprotein/internal/summary"
+	"github.com/smsnk/pprotein/internal/client"
 )
 
 const group = "2026-10-11_17-02-15.633789"
 
-func entry(id, groupId, label, status, msg string) summary.Entry {
-	e := summary.Entry{Status: status, Message: msg}
+func entry(id, groupId, label, status, msg string) client.Entry {
+	e := client.Entry{Status: status, Message: msg}
 	e.Snapshot.ID = id
 	e.Snapshot.GroupId = groupId
 	e.Snapshot.Label = label
@@ -21,13 +21,20 @@ func entry(id, groupId, label, status, msg string) summary.Entry {
 }
 
 // fakeAPI は Load が読む pprotein の API だけを返す。bodies はパスごとの本文（生ログ・dbquery の結果）。
-func fakeAPI(t *testing.T, httplogs, dbqueries []summary.Entry, bodies map[string]string) *summary.Client {
+func fakeAPI(t *testing.T, httplogs, dbqueries []client.Entry, bodies map[string]string) *client.Client {
 	t.Helper()
 	mux := http.NewServeMux()
 	writeJSON := func(w http.ResponseWriter, v any) {
 		if err := json.NewEncoder(w).Encode(v); err != nil {
 			t.Error(err)
 		}
+	}
+	// 本物の API と同じく、一覧のエントリには収集タイプが入っている
+	for i := range httplogs {
+		httplogs[i].Snapshot.Type = "httplog"
+	}
+	for i := range dbqueries {
+		dbqueries[i].Snapshot.Type = "dbquery"
 	}
 	mux.HandleFunc("/api/httplog", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, httplogs) })
 	mux.HandleFunc("/api/dbquery", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, dbqueries) })
@@ -42,24 +49,24 @@ func fakeAPI(t *testing.T, httplogs, dbqueries []summary.Entry, bodies map[strin
 	})
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return summary.NewClient(srv.URL)
+	return client.New(srv.URL)
 }
 
 // 走行直後は httplog の収集（Duration 110s）が終わっていない。飛ばしたことを警告に出す。
 func TestLoadWarnsPendingAndFailedEntries(t *testing.T) {
 	cfg := mustConfig(t, "httplog:\n  label: isu1\n")
-	client := fakeAPI(t,
-		[]summary.Entry{
+	api := fakeAPI(t,
+		[]client.Entry{
 			entry("h1", group, "isu1", "pending", "Collecting"),
 			entry("h2", group, "isu2", "pending", "Collecting"), // label が違うので対象外
 			entry("h0", "2026-10-11_16-41-34.230854", "isu1", "ok", "Ready"),
 		},
-		[]summary.Entry{
+		[]client.Entry{
 			entry("d1", group, "", "fail", "dial tcp: connection refused"),
 		},
 		nil,
 	)
-	in, err := Load(client, cfg, group)
+	in, err := Load(api, cfg, group)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,9 +85,9 @@ func TestLoadWarnsPendingAndFailedEntries(t *testing.T) {
 // 確定した httplog だけなら警告は出ない。dbquery の失敗は、再実行で成功していれば無視する。
 func TestLoadIgnoresDBQueryFailureRetried(t *testing.T) {
 	cfg := mustConfig(t, "httplog:\n  entity_key: session\n")
-	client := fakeAPI(t,
-		[]summary.Entry{entry("h1", group, "isu1", "ok", "Ready")},
-		[]summary.Entry{
+	api := fakeAPI(t,
+		[]client.Entry{entry("h1", group, "isu1", "ok", "Ready")},
+		[]client.Entry{
 			entry("d1", group, "", "fail", "timeout"),
 			entry("d2", group, "", "ok", "Ready"),
 		},
@@ -89,7 +96,7 @@ func TestLoadIgnoresDBQueryFailureRetried(t *testing.T) {
 			"/api/dbquery/d2":      `{"Queries":[]}`,
 		},
 	)
-	in, err := Load(client, cfg, group)
+	in, err := Load(api, cfg, group)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,21 +105,19 @@ func TestLoadIgnoresDBQueryFailureRetried(t *testing.T) {
 	}
 }
 
-func TestLatestGroupIncludesPending(t *testing.T) {
-	client := fakeAPI(t,
-		[]summary.Entry{
+// /api/analysis/latest も CLI と同じく、収集中・失敗した収集を含め、どの収集タイプでも最新を指す
+func TestLatestGroupIsNewest(t *testing.T) {
+	api := fakeAPI(t,
+		[]client.Entry{
 			entry("h0", "2026-10-11_16-41-34.230854", "isu1", "ok", "Ready"),
 			entry("h1", group, "isu1", "pending", "Collecting"),
 			entry("h2", "2026-10-11_17-30-00.000000", "isu1", "fail", "error"),
 		},
-		nil, nil,
+		[]client.Entry{entry("d1", "2026-10-11_17-45-00.000000", "", "ok", "Ready")}, // httplog の無い新しい収集
+		nil,
 	)
-	id, err := LatestGroup(client)
-	if err != nil || id != group {
+	id, err := LatestGroup(api)
+	if err != nil || id != "2026-10-11_17-45-00.000000" {
 		t.Errorf("latest = %q, %v", id, err)
-	}
-	n, err := Pending(client, group)
-	if err != nil || n != 1 {
-		t.Errorf("pending = %d, %v", n, err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"strconv"
 
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/summary"
 )
 
@@ -78,11 +79,11 @@ const (
 // 集計は summary パッケージ（CLI と同じ経路）を使う。自分自身の API を叩くので、
 // alp / pt-query-digest の結果はサーバー側のキャッシュがそのまま効く。
 type Handler struct {
-	client *summary.Client
+	client *client.Client
 }
 
 func NewHandler(selfURL string) *Handler {
-	return &Handler{client: summary.NewClient(selfURL)}
+	return &Handler{client: client.New(selfURL)}
 }
 
 func (h *Handler) RegisterHandlers(g *echo.Group) {
@@ -98,45 +99,53 @@ func (h *Handler) getTrend(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusInternalServerError, fmt.Sprintf("failed to list entries: %v", err))
 	}
 
-	ids := summary.GroupIDs(entries) // 新しい順
+	ids := client.GroupIDs(entries) // 新しい順
 	if len(ids) > limit {
 		ids = ids[:limit]
 	}
 	// グラフは古い順に並べる
 	sort.Sort(sort.StringSlice(ids))
 
+	// コミットのメッセージは全文を返す（summary.Group は1行目しか持たない）
+	messages := map[string]string{}
+	for _, e := range entries {
+		if r := e.Snapshot.Repository; r != nil {
+			messages[r.Hash] = r.Message
+		}
+	}
+
 	resp := &Response{Groups: make([]Point, 0, len(ids))}
 	for _, id := range ids {
 		// topN で切り詰める前の全件を読む。Metrics（総数・合計）を
 		// 上位 topN 件だけから集計すると、件数の多い軽量エンドポイントが
 		// 抜け落ちて「リクエスト総数」が実際より小さく出る。
-		g, err := summary.Load(h.client, id, 0)
+		g, err := summary.Load(h.client, id, 0, "score", "httplog", "slowlog")
 		if err != nil {
 			continue // 収集中 / 壊れている group は飛ばす
 		}
-		resp.Groups = append(resp.Groups, buildPoint(g, topN))
+		p := buildPoint(g, topN)
+		if p.Commit != nil {
+			p.Commit.Message = messages[p.Commit.Hash]
+		}
+		resp.Groups = append(resp.Groups, p)
 	}
 	return c.JSON(http.StatusOK, resp)
 }
 
 func buildPoint(g *summary.Group, topN int) Point {
 	p := Point{
-		ID:      g.ID,
+		ID:      g.GroupId,
 		Metrics: map[string]float64{},
 	}
 	if !g.Datetime.IsZero() {
 		p.Datetime = g.Datetime.Format("2006-01-02 15:04:05")
 	}
-	if g.Repository != nil && g.Repository.Hash != "" {
-		p.Commit = &Commit{
-			Hash:    g.Repository.Hash,
-			Message: g.Repository.Message,
-			Ref:     g.Repository.Ref,
-		}
+	if c := g.Commit; c != nil {
+		p.Commit = &Commit{Hash: c.Hash, Message: c.Message, Ref: c.Ref}
 	}
 	if g.Score != nil {
-		p.Score = &Score{Value: g.Score.Score, Passed: g.Score.Passed}
-		p.Metrics[MetricScoreValue] = float64(g.Score.Score)
+		p.Score = &Score{Value: g.Score.Value, Passed: g.Score.Passed}
+		p.Metrics[MetricScoreValue] = float64(g.Score.Value)
 	}
 
 	// httplog: 合計レスポンスタイムとリクエスト総数。

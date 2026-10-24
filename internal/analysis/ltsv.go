@@ -46,14 +46,14 @@ func NewNormalizer(alpConfig []byte) (*Normalizer, error) {
 	}{}
 	if len(alpConfig) > 0 {
 		if err := yaml.Unmarshal(alpConfig, &cfg); err != nil {
-			return nil, fmt.Errorf("failed to parse alp config: %w", err)
+			return nil, fmt.Errorf("alp の設定を読めません: %w", err)
 		}
 	}
 	n := &Normalizer{}
 	for _, g := range cfg.MatchingGroups {
 		re, err := regexp.Compile(g)
 		if err != nil {
-			return nil, fmt.Errorf("invalid matching group %q: %w", g, err)
+			return nil, fmt.Errorf("matching_groups の %q が正規表現として正しくない: %w", g, err)
 		}
 		n.groups = append(n.groups, re)
 	}

@@ -3,12 +3,15 @@ package summary
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/goccy/go-json"
 	"github.com/google/pprof/profile"
+	"github.com/smsnk/pprotein/internal/client"
 )
 
 // alp v1.0.21 に --format tsv を実行させた実際の出力。
@@ -110,19 +113,59 @@ func TestParseProfile(t *testing.T) {
 	if len(funcs) != 2 {
 		t.Fatalf("funcs = %+v", funcs)
 	}
-	// flat は葉にだけ付く
-	if funcs[0].Name != "main.handleNotification" || funcs[0].Flat != 1.5e9 {
+	// flat は葉にだけ付く。時間は秒に直す
+	if funcs[0].Name != "main.handleNotification" || funcs[0].Flat != 1.5 {
 		t.Errorf("葉 = %+v", funcs[0])
 	}
-	if funcs[0].FlatPct != 100 {
-		t.Errorf("FlatPct = %v, want 100", funcs[0].FlatPct)
+	if funcs[0].FlatShare != 1 {
+		t.Errorf("FlatShare = %v, want 1", funcs[0].FlatShare)
 	}
 	// 呼び出し元は flat 0 / cum あり
-	if funcs[1].Flat != 0 || funcs[1].Cum != 1.5e9 {
+	if funcs[1].Flat != 0 || funcs[1].Cum != 1.5 {
 		t.Errorf("呼び出し元 = %+v", funcs[1])
 	}
-	if funcs[0].Unit != "nanoseconds" {
+	if funcs[0].Unit != "seconds" {
 		t.Errorf("Unit = %q", funcs[0].Unit)
+	}
+}
+
+// inline された関数は1つの Location に Line として並ぶ。flat は Line[0]（最も内側）にだけ付く。
+func TestParseProfileInlined(t *testing.T) {
+	leaf := &profile.Function{ID: 1, Name: "leaf"}
+	caller := &profile.Function{ID: 2, Name: "caller"}
+	other := &profile.Function{ID: 3, Name: "other"}
+	inlined := &profile.Location{ID: 1, Line: []profile.Line{{Function: leaf}, {Function: caller}}}
+	plain := &profile.Location{ID: 2, Line: []profile.Line{{Function: other}}}
+	p := &profile.Profile{
+		SampleType: []*profile.ValueType{{Type: "samples", Unit: "count"}, {Type: "cpu", Unit: "nanoseconds"}},
+		Function:   []*profile.Function{leaf, caller, other},
+		Location:   []*profile.Location{inlined, plain},
+		Sample: []*profile.Sample{
+			{Location: []*profile.Location{inlined}, Value: []int64{1, 100}},
+			{Location: []*profile.Location{plain}, Value: []int64{1, 100}},
+		},
+	}
+	var buf bytes.Buffer
+	if err := p.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	funcs, err := ParseProfile(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]Func{}
+	for _, f := range funcs {
+		byName[f.Name] = f
+	}
+	if f := byName["leaf"]; f.Flat != 100e-9 || f.FlatShare != 0.5 {
+		t.Errorf("leaf = %+v", f)
+	}
+	if f := byName["caller"]; f.Flat != 0 || f.Cum != 100e-9 {
+		t.Errorf("caller（inline された呼び出し元）= %+v", f)
+	}
+	if f := byName["other"]; f.FlatShare != 0.5 {
+		t.Errorf("other = %+v", f)
 	}
 }
 
@@ -131,7 +174,7 @@ func mockServer(t *testing.T, groups map[string]map[string]string, scores map[st
 	t.Helper()
 
 	mux := http.NewServeMux()
-	for _, typ := range CollectTypes {
+	for _, typ := range client.Types {
 		typ := typ
 		mux.HandleFunc("/api/"+typ, func(w http.ResponseWriter, r *http.Request) {
 			entries := []string{}
@@ -194,19 +237,16 @@ func TestLoadAndMarkdown(t *testing.T) {
 		},
 	)
 
-	g, err := Load(NewClient(s.URL), "", 2)
+	g, err := Load(client.New(s.URL), "2025-11-23_10-41-02.984213", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if g.ID != "2025-11-23_10-41-02.984213" {
-		t.Errorf("ID = %q（最新が選ばれていない）", g.ID)
-	}
-	if g.Score == nil || g.Score.Score != 18902 {
+	if g.Score == nil || g.Score.Value != 18902 {
 		t.Errorf("Score = %+v", g.Score)
 	}
-	if g.Repository == nil || g.Repository.Hash != "a1b2c3d4e5f6" {
-		t.Errorf("Repository = %+v", g.Repository)
+	if g.Commit == nil || g.Commit.Hash != "a1b2c3d4e5f6" || g.Commit.Message != "notification のキャッシュ" {
+		t.Errorf("Commit = %+v", g.Commit)
 	}
 	if len(g.HTTPLog) != 1 || len(g.HTTPLog[0].Endpoints) != 2 {
 		t.Errorf("--top が効いていない: %+v", g.HTTPLog)
@@ -214,11 +254,11 @@ func TestLoadAndMarkdown(t *testing.T) {
 
 	md := g.Markdown()
 	for _, want := range []string{
-		"# group 2025-11-23_10-41-02.984213",
-		"score=18902 pass errors=3",
-		`a1b2c3d "notification のキャッシュ"`,
-		"## httplog: isu1",
-		"/api/chair/rides/abc123",
+		"# summary 2025-11-23_10-41-02.984213",
+		"- スコア: 18902（エラー 3 / 対象 isu1）\n",
+		`- コミット: a1b2c3d "notification のキャッシュ" (refs/heads/12-cache)`,
+		"## httplog: isu1（SUM の大きい順に 2 件）",
+		"| 1 | GET | /api/chair/rides/abc123 | 0.900s | 0.900s | 0.900s |",
 		"## slowlog: isu1",
 		"ROWS EXAMINED",
 		"## resource: isu1",
@@ -252,7 +292,7 @@ func TestCompare(t *testing.T) {
 			"2025-11-23_10-41-02.984213": `{"Score":18902,"Passed":true}`,
 		},
 	)
-	c := NewClient(s.URL)
+	c := client.New(s.URL)
 
 	before, err := Load(c, "2025-11-23_10-21-33.123456", 0)
 	if err != nil {
@@ -264,7 +304,7 @@ func TestCompare(t *testing.T) {
 	}
 
 	d := Compare(before, after, 10)
-	if d.Score == nil || d.Score.Before != 12345 || d.Score.After != 18902 {
+	if d.Score == nil || d.Score.Before.Value != 12345 || d.Score.After.Value != 18902 {
 		t.Fatalf("Score = %+v", d.Score)
 	}
 
@@ -273,32 +313,48 @@ func TestCompare(t *testing.T) {
 		byKey[e.Key] = e
 	}
 	// 改善したもの
-	if e := byKey["GET /api/app/notification"]; e.SumBefore != 0.46 || e.SumAfter != 0.1 {
+	if e := byKey["GET /api/app/notification"]; e.Before.Sum != 0.46 || e.After.Sum != 0.1 {
 		t.Errorf("notification = %+v", e)
 	}
 	// 悪化したもの
-	if e := byKey["POST /api/app/rides"]; e.SumDelta() != 0.25 {
-		t.Errorf("rides delta = %v, want 0.25", e.SumDelta())
+	if e := byKey["POST /api/app/rides"]; e.After.Sum-e.Before.Sum != 0.25 {
+		t.Errorf("rides delta = %v, want 0.25", e.After.Sum-e.Before.Sum)
 	}
-	// after から消えたものも残す
-	if e, ok := byKey["GET /api/chair/rides/abc123"]; !ok || e.SumAfter != 0 {
-		t.Errorf("消えたエンドポイントが残っていない: %+v", byKey)
+	// after から消えたものも残し、SUM がまるごと減ったものとして数える
+	if e, ok := byKey["GET /api/chair/rides/abc123"]; !ok || e.After != nil || e.Impact != -0.9 {
+		t.Errorf("消えたエンドポイント = %+v", e)
 	}
 	// IMPACT の大きい順
 	if d.Endpoints[0].Key != "GET /api/chair/rides/abc123" {
 		t.Errorf("並び順 = %+v", d.Endpoints)
 	}
+	// after に slowlog が丸ごと無くても、before のクエリは削除として残す
+	if len(d.Queries) != 2 || d.Queries[0].After != nil || d.Queries[0].Label != "isu1" {
+		t.Errorf("Queries = %+v", d.Queries)
+	}
 
 	md := d.Markdown()
 	for _, want := range []string{
-		"# diff 2025-11-23_10-21-33.123456 -> 2025-11-23_10-41-02.984213",
-		"score: 12345 -> 18902 (+6557, +53.1%)",
-		"## httplog",
-		"IMPACT",
+		"# summary diff 2025-11-23_10-21-33.123456 -> 2025-11-23_10-41-02.984213",
+		"- スコア: 12345 -> 18902 (+6557, +53.1%)",
+		`- コミット: a1b2c3d "notification のキャッシュ" (refs/heads/12-cache) -> a1b2c3d "notification のキャッシュ" (refs/heads/12-cache)`,
+		"## httplog（IMPACT の大きい順）",
+		"| isu1 | GET /api/chair/rides/abc123 | 1 → （なし） | 0.900s → （なし） | 0.900s → （なし） | -0.900s（削除） |",
 	} {
 		if !strings.Contains(md, want) {
 			t.Errorf("Markdown に %q が無い:\n%s", want, md)
 		}
+	}
+
+	// JSON には GroupId だけを載せ、収集の中身（全エンドポイント・プロファイル）は載せない
+	buf, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(buf), `"Before":"2025-11-23_10-21-33.123456"`) || strings.Contains(string(buf), "HTTPLog") ||
+		!strings.Contains(string(buf), `"ImpactSec":-0.9`) || !strings.Contains(string(buf), `"Commit":{"Before":{"Hash":"a1b2c3d4e5f6"`) ||
+		strings.Contains(string(buf), `"Key"`) {
+		t.Errorf("JSON = %s", buf)
 	}
 }
 
@@ -318,7 +374,7 @@ func TestCompareRanksByImpactNotSumDelta(t *testing.T) {
 		"2025-11-23_10-21-33.123456": {"httplog": beforeAlp},
 		"2025-11-23_10-41-02.984213": {"httplog": afterAlp},
 	}, map[string]string{})
-	c := NewClient(s.URL)
+	c := client.New(s.URL)
 
 	before, err := Load(c, "2025-11-23_10-21-33.123456", 0)
 	if err != nil {
@@ -332,23 +388,133 @@ func TestCompareRanksByImpactNotSumDelta(t *testing.T) {
 	d := Compare(before, after, 10)
 
 	// SUM の増減だけ見ると cold(-3.301) > hot(-3.097) で順位が逆転する
-	if !(abs(d.Endpoints[0].SumDelta()) < abs(d.Endpoints[1].SumDelta())) {
+	sumDelta := func(e EndpointDiff) float64 { return math.Abs(e.After.Sum - e.Before.Sum) }
+	if !(sumDelta(d.Endpoints[0]) < sumDelta(d.Endpoints[1])) {
 		t.Fatalf("この前提が崩れるとテストの意味がない: %+v", d.Endpoints)
 	}
 	if d.Endpoints[0].Key != "GET /hot" {
 		t.Errorf("件数の多いエンドポイントが先頭に来るはず: %+v", d.Endpoints)
 	}
-	if d.Endpoints[0].Impact() >= -100 {
-		t.Errorf("hot の IMPACT = %v, もっと大きな削減のはず", d.Endpoints[0].Impact())
+	if d.Endpoints[0].Impact >= -100 {
+		t.Errorf("hot の IMPACT = %v, もっと大きな削減のはず", d.Endpoints[0].Impact)
+	}
+}
+
+// alp の AVG は小数3桁に丸められている。1ms 前後のエンドポイントの改善が IMPACT 0 にならないように SUM / COUNT を使う
+func TestImpactUsesSumOverCount(t *testing.T) {
+	// 1.46ms → 0.73ms。alp の AVG はどちらも 0.001
+	before := map[string][]Endpoint{"isu1": {{Method: "GET", Uri: "/fast", Count: 1024, Sum: 1.5, Avg: 0.001}}}
+	after := map[string][]Endpoint{"isu1": {{Method: "GET", Uri: "/fast", Count: 1024, Sum: 0.75, Avg: 0.001}}}
+	if got := compareRows(before, after, 0)[0].Impact; got != -0.75 {
+		t.Errorf("Impact = %v, want -0.75", got)
+	}
+}
+
+// 同じ値の行は名前・label・キーの順に並べ、実行ごとに並びが変わらない
+func TestTiesAreStable(t *testing.T) {
+	fns := []*profile.Function{{ID: 1, Name: "c"}, {ID: 2, Name: "a"}, {ID: 3, Name: "b"}}
+	p := &profile.Profile{
+		SampleType: []*profile.ValueType{{Type: "cpu", Unit: "nanoseconds"}},
+		Function:   fns,
+	}
+	for i, fn := range fns {
+		loc := &profile.Location{ID: uint64(i + 1), Line: []profile.Line{{Function: fn}}}
+		p.Location = append(p.Location, loc)
+		p.Sample = append(p.Sample, &profile.Sample{Location: []*profile.Location{loc}, Value: []int64{10}})
+	}
+	var buf bytes.Buffer
+	if err := p.Write(&buf); err != nil {
+		t.Fatal(err)
+	}
+
+	same := func(count float64) []Endpoint {
+		return []Endpoint{{Method: "GET", Uri: "/b", Count: count, Sum: 1, Avg: 1}, {Method: "GET", Uri: "/a", Count: count, Sum: 1, Avg: 1}}
+	}
+	before := map[string][]Endpoint{"isu2": same(1), "isu1": same(1)}
+
+	// map を回す順は毎回変わるので、何度か試す
+	for i := 0; i < 20; i++ {
+		funcs, err := ParseProfile(buf.Bytes())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := funcs[0].Name + funcs[1].Name + funcs[2].Name; got != "abc" {
+			t.Fatalf("pprof の並び = %s", got)
+		}
+
+		keys := []string{}
+		for _, d := range compareRows(before, map[string][]Endpoint{}, 0) {
+			keys = append(keys, d.Label+" "+d.Key)
+		}
+		if got := strings.Join(keys, ", "); got != "isu1 GET /a, isu1 GET /b, isu2 GET /a, isu2 GET /b" {
+			t.Fatalf("diff の並び = %s", got)
+		}
 	}
 }
 
 func TestLoadMissingGroup(t *testing.T) {
 	s := mockServer(t, map[string]map[string]string{}, map[string]string{})
-	if _, err := Load(NewClient(s.URL), "", 10); err == nil {
-		t.Error("収集が無いときはエラーにする")
-	}
-	if _, err := Load(NewClient(s.URL), "nosuch", 10); err == nil {
+	if _, err := Load(client.New(s.URL), "nosuch", 10); err == nil {
 		t.Error("存在しない group はエラーにする")
+	}
+}
+
+// 中身を読めなかったエントリは黙って落とさず警告に出す
+func TestLoadReportsUnreadableEntries(t *testing.T) {
+	s := mockServer(t,
+		map[string]map[string]string{
+			"2025-11-23_10-41-02.984213": {"httplog": alpTSV, "score": ""},
+		},
+		map[string]string{}, // score の中身が無い（404）
+	)
+	g, err := Load(client.New(s.URL), "2025-11-23_10-41-02.984213", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.Warnings) != 1 || !strings.HasPrefix(g.Warnings[0], "score isu1 の中身を読めなかった（") {
+		t.Errorf("Warnings = %v", g.Warnings)
+	}
+	if len(g.HTTPLog) != 1 {
+		t.Errorf("読めたものは残す: %+v", g.HTTPLog)
+	}
+}
+
+func TestLoadOnlyGivenTypes(t *testing.T) {
+	s := mockServer(t,
+		map[string]map[string]string{
+			"2025-11-23_10-41-02.984213": {"httplog": alpTSV, "slowlog": slpTSV, "resource": "busy 92.4\n"},
+		},
+		map[string]string{},
+	)
+	g, err := Load(client.New(s.URL), "2025-11-23_10-41-02.984213", 10, "httplog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(g.HTTPLog) != 1 || g.SlowLog != nil || g.Resource != nil {
+		t.Errorf("httplog だけ読むはず: %+v", g)
+	}
+}
+
+// 同じ収集にスコアが複数あれば、一覧の順によらず新しいものを使う
+func TestLoadUsesNewestScore(t *testing.T) {
+	const group = "2025-11-23_10-41-02.984213"
+	entry := func(id, at string) string {
+		return fmt.Sprintf(`{"Snapshot":{"Type":"score","ID":%q,"Datetime":%q,"GroupId":%q,"Label":"bench"},"Status":"ok"}`, id, at, group)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/score", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "[%s,%s]", entry("new", "2025-11-23T10:45:00Z"), entry("old", "2025-11-23T10:43:00Z"))
+	})
+	mux.HandleFunc("/api/score/old", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"Score":1}`) })
+	mux.HandleFunc("/api/score/new", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"Score":2,"Passed":true}`) })
+	s := httptest.NewServer(mux)
+	t.Cleanup(s.Close)
+
+	g, err := Load(client.New(s.URL), group, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Score == nil || g.Score.Value != 2 {
+		t.Errorf("Score = %+v", g.Score)
 	}
 }

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 func intp(n int) *int { return &n }
@@ -59,10 +61,10 @@ series:
 	}
 }
 
-func report(id string, hash string, score int64) *Report {
+func report(id string, hash string, value int64) *Report {
 	return &Report{
 		GroupId:    id,
-		Score:      &ScoreInfo{Value: score, Passed: true},
+		Score:      &score.Brief{Value: value, Passed: true},
 		ConfigHash: ConfigHash{Analysis: hash, DBQuery: "db1"},
 	}
 }
@@ -101,7 +103,7 @@ func TestCompareWarnsOnConfigMismatchAndSplitsSeries(t *testing.T) {
 	RenderDiffMarkdown(&buf, d)
 	out := buf.String()
 	for _, want := range []string{
-		"- score: 3000 -> 3600 (+600, +20.0%)",
+		"- スコア: 3000 -> 3600 (+600, +20.0%)",
 		"| tip | 3000 | 3600 | +600 | +20.0% | 50s→45s | 85s→80s |",
 		"| old | 5 | （なし） | 削除 |",
 		"| new | （なし） | 7 | 追加 |",
@@ -109,6 +111,22 @@ func TestCompareWarnsOnConfigMismatchAndSplitsSeries(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("markdown lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// summary diff と同じく、比べた2回のコミットを出す
+func TestCompareShowsCommits(t *testing.T) {
+	b, a := report("A", "h1", 1), report("B", "h1", 2)
+	b.Commit = &git.Commit{Hash: "aaaaaaaaaa", Message: "before"}
+	a.Commit = &git.Commit{Hash: "bbbbbbbbbb", Message: "after", Ref: "refs/heads/x"}
+	d := Compare(b, a, 10)
+	var buf bytes.Buffer
+	RenderDiffMarkdown(&buf, d)
+	if !strings.Contains(buf.String(), `- コミット: aaaaaaa "before" -> bbbbbbb "after" (refs/heads/x)`) {
+		t.Errorf("markdown:\n%s", buf.String())
+	}
+	if d.Commit == nil || d.Commit.Before.Hash != "aaaaaaaaaa" {
+		t.Errorf("Commit = %+v", d.Commit)
 	}
 }
 
@@ -124,6 +142,13 @@ func TestCompareEndpointsByShare(t *testing.T) {
 	// 比率の差: icon 80%→40% (-40pt), comment 20%→40% (+20pt), new 0→20% (+20pt)
 	if d.Endpoints[0].Key != "GET /icon" || d.Endpoints[0].ShareAfter != 0.4 {
 		t.Errorf("first = %+v", d.Endpoints[0])
+	}
+	// 割合はほかと同じく 0.01% の単位に丸める
+	if e := compareEndpoints(map[string]int{"a": 1, "b": 2}, map[string]int{"a": 1, "b": 2}, 0); e[0].ShareBefore != 0.3333 {
+		t.Errorf("ShareBefore = %v", e[0].ShareBefore)
+	}
+	if got := topShare([]float64{0.0001, 0.0185, 0.0101}, 3); got != 0.0287 {
+		t.Errorf("topShare = %v", got)
 	}
 }
 
@@ -146,7 +171,7 @@ func TestCompareLifecyclesAlignsStepsByName(t *testing.T) {
 	}
 	var buf bytes.Buffer
 	RenderDiffMarkdown(&buf, d)
-	if !strings.Contains(buf.String(), "| post | 17→29 | 89.5%→96.7% | 0→0 | 0.0→0.0 | 0.50s→0.20s | 3.70s→1.00s |") {
+	if !strings.Contains(buf.String(), "| post | 17→29 | 89.5%→96.7% | 0→0 | 0.0→0.0 | 0.500s→0.200s | 3.700s→1.000s |") {
 		t.Errorf("markdown:\n%s", buf.String())
 	}
 }

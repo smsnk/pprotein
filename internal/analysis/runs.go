@@ -12,8 +12,11 @@ import (
 	"sync"
 
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/client"
 	"github.com/smsnk/pprotein/internal/dbquery"
-	"github.com/smsnk/pprotein/internal/summary"
+	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/md"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 // 複数の走行の要約を1回で返す（GET /api/analysis?limit=N）。
@@ -35,8 +38,8 @@ type (
 
 	RunSummary struct {
 		GroupId    string
-		Score      *ScoreInfo `json:",omitempty"`
-		Commit     *Commit    `json:",omitempty"`
+		Score      *score.Brief `json:",omitempty"`
+		Commit     *git.Commit  `json:",omitempty"`
 		ConfigHash ConfigHash
 		// Warnings は収集中・失敗のエントリなど、この走行の集計が欠けている理由。
 		Warnings []string `json:",omitempty"`
@@ -127,14 +130,15 @@ func (c *memo[T]) put(key string, r T) {
 }
 
 // entryIndex は収集タイプをまたいだエントリを GroupId ごとにまとめる。
-type entryIndex map[string][]summary.Entry
+type entryIndex map[string][]client.Entry
 
-var cacheTypes = []string{"httplog", "dbquery", "score"}
+// Types は analyze が読む収集タイプ。
+var Types = []string{"httplog", "dbquery", "score"}
 
-func loadEntryIndex(client *summary.Client) (entryIndex, error) {
+func loadEntryIndex(api *client.Client) (entryIndex, error) {
 	idx := entryIndex{}
-	for _, typ := range cacheTypes {
-		entries, err := client.Entries(typ)
+	for _, typ := range Types {
+		entries, err := api.Entries(typ)
 		if err != nil {
 			if typ == "httplog" {
 				return nil, err
@@ -189,9 +193,10 @@ func (h *Handler) getRuns(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	limit := defaultRunsLimit
-	if v, err := strconv.Atoi(c.QueryParam("limit")); err == nil && v > 0 {
-		limit = min(v, maxRunsLimit)
+	// 0 は全部。ただし1回に集計するのは maxRunsLimit 走行まで（observer のメモリ）
+	limit := intParam(c, "limit", defaultRunsLimit)
+	if limit == 0 || limit > maxRunsLimit {
+		limit = maxRunsLimit
 	}
 
 	withEndpoints := c.QueryParam("endpoints") == "1"
@@ -200,7 +205,7 @@ func (h *Handler) getRuns(c echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
-	httplogs := []summary.Entry{}
+	httplogs := []client.Entry{}
 	for _, entries := range idx {
 		for _, e := range entries {
 			if e.Snapshot.Type == "httplog" && e.Status != "fail" {
@@ -208,7 +213,7 @@ func (h *Handler) getRuns(c echo.Context) error {
 			}
 		}
 	}
-	ids := summary.GroupIDs(httplogs) // 新しい順
+	ids := client.GroupIDs(httplogs) // 新しい順
 	if len(ids) > limit {
 		ids = ids[:limit]
 	}
@@ -229,17 +234,14 @@ func (h *Handler) getRuns(c echo.Context) error {
 	return compactJSON(c, resp)
 }
 
-// getDiff は GET /api/analysis/diff?before=<GroupId>&after=<GroupId>[&top=N]。
-// pprotein-cli analyze-diff --json と同じものを返す（UI の比較画面が使う）。
+// getDiff は GET /api/analysis/diff?before=<GroupId>&after=<GroupId>[&top=N]。top が無ければ 10、0 なら全部。
+// pprotein-cli analyze diff --json と同じものを返す（UI の比較画面が使う）。
 func (h *Handler) getDiff(c echo.Context) error {
 	before, after := c.QueryParam("before"), c.QueryParam("after")
 	if before == "" || after == "" {
-		return echo.NewHTTPError(http.StatusBadRequest, "before and after are required")
+		return echo.NewHTTPError(http.StatusBadRequest, "before と after を指定する")
 	}
-	top := defaultTop
-	if v, err := strconv.Atoi(c.QueryParam("top")); err == nil && v > 0 {
-		top = v
-	}
+	top := intParam(c, "top", defaultTop)
 	cfg, raw, err := h.loadConfig()
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
@@ -257,6 +259,15 @@ func (h *Handler) getDiff(c echo.Context) error {
 		return echo.NewHTTPError(http.StatusNotFound, err.Error())
 	}
 	return compactJSON(c, Compare(b, a, top))
+}
+
+// intParam はクエリの整数を返す。無い・数でない・負なら def。0 は「全部」の意味で使う。
+func intParam(c echo.Context, key string, def int) int {
+	v, err := strconv.Atoi(c.QueryParam(key))
+	if err != nil || v < 0 {
+		return def
+	}
+	return v
 }
 
 func hashConfig(raw []byte) string {
@@ -299,7 +310,7 @@ func Summarize(rep *Report) RunSummary {
 // RenderRunsMarkdown は走行を1行ずつ並べた表にする。
 // 系列は役割（score / driver / penalty）が付いたものを優先し、無ければ先頭から最大6本。
 func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
-	fmt.Fprintf(w, "# analyze-trend（%d 走行、古い順）\n\n", len(resp.Runs))
+	fmt.Fprintf(w, "# analyze trend（%d 走行、古い順）\n\n", len(resp.Runs))
 	if len(resp.Runs) == 0 {
 		fmt.Fprintln(w, "走行なし")
 		return
@@ -331,7 +342,7 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		lifecycles = append(lifecycles, l.Name)
 	}
 
-	head := []string{"GroupId", "commit", "score"}
+	head := []string{"GroupId", "commit", "score", "errors"}
 	for _, n := range series {
 		if r := roles[n]; r != "" {
 			n += " [" + r + "]"
@@ -342,16 +353,16 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 	for _, l := range lifecycles {
 		head = append(head, l+" 開始→最後")
 	}
-	writeRow(w, head)
-	writeSep(w, len(head))
+	md.Row(w, head)
+	md.Sep(w, len(head))
 
 	for _, r := range resp.Runs {
-		row := []string{r.GroupId, "", "-"}
+		row := []string{r.GroupId, "", "-", "-"}
 		if r.Commit != nil {
-			row[1] = shortHash(r.Commit.Hash)
+			row[1] = r.Commit.ShortHash()
 		}
 		if r.Score != nil {
-			row[2] = scoreCell(r.Score)
+			row[2], row[3] = r.Score.String(), md.Int(r.Score.ErrorCount)
 		}
 		totals := map[string]float64{}
 		for _, st := range r.Series {
@@ -359,13 +370,13 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		}
 		for _, n := range series {
 			if v, ok := totals[n]; ok {
-				row = append(row, num(v))
+				row = append(row, md.Num(v))
 			} else {
 				row = append(row, "-")
 			}
 		}
 		q := r.Requests
-		row = append(row, itoa(q.Requests), itoa(q.S5xx), itoa(q.S499), fmt.Sprintf("%.3f", q.P99))
+		row = append(row, md.Int(q.Requests), md.Int(q.S5xx), md.Int(q.S499), md.Sec(q.P99))
 		for _, name := range lifecycles {
 			cell := "-"
 			for _, l := range r.Lifecycles {
@@ -378,7 +389,7 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		if len(r.Warnings) > 0 {
 			row[0] += " ⚠"
 		}
-		writeRow(w, row)
+		md.Row(w, row)
 	}
 	fmt.Fprintln(w)
 
@@ -387,7 +398,7 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		hashes[r.ConfigHash.Analysis+"/"+r.ConfigHash.DBQuery] = true
 	}
 	if len(hashes) > 1 {
-		fmt.Fprintln(w, "- **警告**: 走行によって analysis.yml / dbquery.yml が違う。系列の値はその境目の前後で比べられないことがある")
+		md.Warnings(w, []string{"走行によって analysis.yml / dbquery.yml が違う。系列の値はその境目の前後で比べられないことがある"})
 	}
 	fmt.Fprintln(w, "- ⚠ の走行は集計が欠けている（収集中・失敗のエントリがある）。詳細は analyze <GroupId>")
 }

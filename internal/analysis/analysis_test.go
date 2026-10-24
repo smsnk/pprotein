@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/score"
 )
 
 const origin = 1_700_000_000.0
@@ -266,5 +267,14 @@ func TestParseConfigRejectsHTTPLogLifecycleWithoutEntityKey(t *testing.T) {
 	_, err := ParseConfig([]byte("lifecycles:\n  - name: x\n    source: httplog\n    steps: [{match: a}]\n"))
 	if err == nil {
 		t.Fatal("want error")
+	}
+}
+
+// 見出しのスコアには、ベンチが送ったエラー件数・対象・時間も出す
+func TestRenderMarkdownShowsScoreDetails(t *testing.T) {
+	var buf bytes.Buffer
+	RenderMarkdown(&buf, &Report{GroupId: "A", Score: &score.Brief{Value: 18902, Passed: true, ErrorCount: 3, Target: "isu1", DurationSec: 60}})
+	if !strings.Contains(buf.String(), "- スコア: 18902（エラー 3 / 対象 isu1 / 60s）") {
+		t.Errorf("markdown:\n%s", buf.String())
 	}
 }

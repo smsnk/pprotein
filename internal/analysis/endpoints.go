@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/labstack/echo/v4"
+	"github.com/smsnk/pprotein/internal/md"
 )
 
 // エンドポイント単位の集計。
@@ -184,12 +185,16 @@ func (h *Handler) getEndpoints(c echo.Context) error {
 }
 
 // RenderEndpointsMarkdown は走行全体のエンドポイント別の集計を表にする（CLI）。
-func RenderEndpointsMarkdown(w io.Writer, groupId string, stats []EndpointStat) {
-	fmt.Fprintf(w, "# endpoints %s（件数の多い順）\n\n", groupId)
-	writeRow(w, []string{"エンドポイント", "件数", "構成比", "p50", "p99", "合計", "エラー", "499"})
-	writeSep(w, 8)
-	for _, s := range stats {
-		writeRow(w, []string{s.Key, itoa(s.Count), pct(s.Share), sec(s.P50), sec(s.P99), sec(s.Sum), itoa(s.Errors), itoa(s.S499)})
+func RenderEndpointsMarkdown(w io.Writer, rep *Report) {
+	fmt.Fprintf(w, "# analyze endpoints %s（件数の多い順）\n\n", rep.GroupId)
+	if len(rep.Warnings) > 0 {
+		md.Warnings(w, rep.Warnings)
+		fmt.Fprintln(w)
+	}
+	md.Row(w, []string{"エンドポイント", "件数", "構成比", "p50", "p99", "合計", "エラー", "499"})
+	md.Sep(w, 8)
+	for _, s := range rep.EndpointStats {
+		md.Row(w, []string{s.Key, md.Int(s.Count), md.Pct(s.Share), md.Sec(s.P50), md.Sec(s.P99), md.Sec(s.Sum), md.Int(s.Errors), md.Int(s.S499)})
 	}
 	fmt.Fprintln(w)
 }

@@ -25,6 +25,11 @@ view/dist:
 	npm --prefix view ci
 	npm --prefix view run build
 
+# docs/cli/ の pprotein-cli のリファレンスをコマンドの定義から作り直す
+.PHONY: docs
+docs:
+	go test ./cli/pprotein-cli -run TestReference -update
+
 .PHONY: clean
 clean:
 	rm -rf pprotein pprotein-agent pprotein-cli view/dist

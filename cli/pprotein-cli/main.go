@@ -2,461 +2,208 @@
 //
 // UI は HTML なのでエージェントからは読めず、API は生 JSON で情報密度が悪い。
 // 1コマンドの出力をそのまま文脈に貼れば、ボトルネックの議論が始められる状態にする。
-//
-//	pprotein-cli latest              直近の収集を要約する
-//	pprotein-cli summary <groupId>   指定した収集を要約する
-//	pprotein-cli groups              収集の一覧（スコア付き）
-//	pprotein-cli diff <A> <B>        2つの収集を比較する
-//	pprotein-cli collect             収集を開始して完了まで待ち、そのまま要約する
-//	pprotein-cli analyze [groupId]   走行を時系列・ライフサイクル・内訳で集計する
-//	pprotein-cli analyze-diff <A> <B>  2つの走行の analyze を比較する
-//	pprotein-cli analyze-trend       直近の走行の得点・母数・利用者の進み方を並べる
-//	pprotein-cli sessions <groupId>  セッション（利用者）の一覧
-//	pprotein-cli session <groupId> <ID>  1セッションの要求の列
-//	pprotein-cli transitions <groupId>   よくある遷移（次に叩くエンドポイント）
-//	pprotein-cli endpoints <groupId>     エンドポイント別の件数・応答時間・エラー（全件）
-//
-// 接続先は --url（既定 http://localhost:9000、環境変数 PPROTEIN_URL でも指定できる）。
+// コマンドのリファレンスは docs/cli/ にある（pprotein-cli --help でも出る）。
 package main
 
 import (
-	"flag"
+	"errors"
 	"fmt"
-	neturl "net/url"
+	"io"
 	"os"
-	"strconv"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/goccy/go-json"
-	"github.com/smsnk/pprotein/internal/analysis"
-	"github.com/smsnk/pprotein/internal/summary"
+	"github.com/smsnk/pprotein/internal/client"
+	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/spf13/cobra"
 )
 
-const usage = `pprotein-cli - pprotein の計測結果をテキストで取り出す
-
-usage:
-  pprotein-cli latest [flags]
-  pprotein-cli summary <groupId> [flags]
-  pprotein-cli groups [flags]
-  pprotein-cli diff <before> <after> [flags]
-  pprotein-cli collect [flags]
-  pprotein-cli analyze [groupId] [flags]   省略時は httplog がある最新の収集
-  pprotein-cli analyze-diff <before> <after> [flags]
-  pprotein-cli analyze-trend [--limit N] [flags]
-  pprotein-cli sessions <groupId> [--lifecycle NAME] [flags]
-  pprotein-cli session <groupId> <sessionId> [flags]
-  pprotein-cli transitions <groupId> [--lifecycle NAME] [flags]
-  pprotein-cli endpoints <groupId> [flags]
-
-flags:
-  --url string     pprotein の URL (既定 $PPROTEIN_URL または http://localhost:9000)
-  --top int        各表に出す件数 (既定 10)
-  --limit int      analyze-trend: 遡る走行の数 (既定 20、最大 100)
-  --lifecycle str  sessions / transitions: そのライフサイクルに入ったセッションに絞る
-  --json           JSON で出力する
-  --wait           collect: 収集の完了を待つ (既定 true)
-                   analyze: 指定したときだけ、その収集の httplog / dbquery が確定するまで待つ
-  --timeout dur    collect / analyze --wait: 完了待ちの上限 (既定 5m)
-`
-
 func main() {
-	if err := run(); err != nil {
+	if err := newRootCmd().Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	if len(os.Args) < 2 {
-		fmt.Print(usage)
-		return nil
-	}
-	cmd := os.Args[1]
-	switch cmd {
-	case "-h", "--help", "help":
-		fmt.Print(usage)
-		return nil
-	}
-
-	fs := flag.NewFlagSet(cmd, flag.ExitOnError)
-	fs.Usage = func() { fmt.Print(usage) }
-	url := fs.String("url", envOr("PPROTEIN_URL", "http://localhost:9000"), "pprotein の URL")
-	topN := fs.Int("top", 10, "各表に出す件数")
-	limit := fs.Int("limit", 20, "analyze-trend: 遡る走行の数")
-	lifecycle := fs.String("lifecycle", "", "sessions / transitions: ライフサイクルで絞る")
-	asJSON := fs.Bool("json", false, "JSON で出力する")
-	wait := fs.Bool("wait", true, "collect: 収集の完了を待つ")
-	timeout := fs.Duration("timeout", 5*time.Minute, "collect: 完了待ちの上限")
-	// flag は最初の非フラグ引数で解析を止めるので、
-	// `diff <A> <B> --url ...` のようにフラグを後ろに置いても効くようにする。
-	var args []string
-	rest := os.Args[2:]
-	for {
-		if err := fs.Parse(rest); err != nil {
-			return err
-		}
-		rest = fs.Args()
-		if len(rest) == 0 {
-			break
-		}
-		args = append(args, rest[0])
-		rest = rest[1:]
-	}
-	// analyze の --wait は既定で待たない。collect と同じフラグなので、明示されたかで分ける。
-	waitSet := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "wait" {
-			waitSet = true
-		}
-	})
-
-	c := summary.NewClient(*url)
-
-	switch cmd {
-	case "latest":
-		return printGroup(c, "", *topN, *asJSON)
-
-	case "summary":
-		if len(args) < 1 {
-			return fmt.Errorf("groupId を指定してください")
-		}
-		return printGroup(c, args[0], *topN, *asJSON)
-
-	case "groups":
-		return printGroups(c, *asJSON)
-
-	case "diff":
-		if len(args) < 2 {
-			return fmt.Errorf("比較する2つの groupId を指定してください")
-		}
-		before, err := summary.Load(c, args[0], 0)
-		if err != nil {
-			return err
-		}
-		after, err := summary.Load(c, args[1], 0)
-		if err != nil {
-			return err
-		}
-		d := summary.Compare(before, after, *topN)
-		if *asJSON {
-			return printJSON(d)
-		}
-		fmt.Print(d.Markdown())
-		return nil
-
-	case "collect":
-		return collect(c, *topN, *asJSON, *wait, *timeout)
-
-	case "analyze":
-		id := "latest"
-		if len(args) > 0 {
-			id = args[0]
-		}
-		if waitSet && *wait {
-			var err error
-			if id, err = waitGroup(c, id, *timeout); err != nil {
-				return err
-			}
-		}
-		return printAnalysis(c, id, *asJSON)
-
-	case "analyze-trend":
-		body, err := c.GetQuery("/api/analysis", neturl.Values{"limit": {strconv.Itoa(*limit)}})
-		if err != nil {
-			return err
-		}
-		if *asJSON {
-			fmt.Println(string(body))
-			return nil
-		}
-		resp := &analysis.RunsResponse{}
-		if err := json.Unmarshal(body, resp); err != nil {
-			return fmt.Errorf("failed to parse analysis runs: %w", err)
-		}
-		analysis.RenderRunsMarkdown(os.Stdout, resp)
-		return nil
-
-	case "sessions", "transitions":
-		if len(args) < 1 {
-			return fmt.Errorf("groupId を指定してください")
-		}
-		q := neturl.Values{}
-		if *lifecycle != "" {
-			q.Set("lifecycle", *lifecycle)
-		}
-		if cmd == "transitions" {
-			q.Set("top", strconv.Itoa(*topN*3))
-		}
-		body, err := c.GetQuery("/api/analysis/"+args[0]+"/"+cmd, q)
-		if err != nil {
-			return err
-		}
-		if *asJSON {
-			fmt.Println(string(body))
-			return nil
-		}
-		if cmd == "sessions" {
-			resp := &analysis.SessionsResponse{}
-			if err := json.Unmarshal(body, resp); err != nil {
-				return err
-			}
-			analysis.RenderSessionsMarkdown(os.Stdout, resp, *topN*5)
-			return nil
-		}
-		resp := &analysis.TransitionsResponse{}
-		if err := json.Unmarshal(body, resp); err != nil {
-			return err
-		}
-		analysis.RenderTransitionsMarkdown(os.Stdout, resp)
-		return nil
-
-	case "endpoints":
-		if len(args) < 1 {
-			return fmt.Errorf("groupId を指定してください")
-		}
-		rep, err := fetchAnalysis(c, args[0])
-		if err != nil {
-			return err
-		}
-		if *asJSON {
-			buf, err := json.Marshal(rep.EndpointStats)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(buf))
-			return nil
-		}
-		analysis.RenderEndpointsMarkdown(os.Stdout, rep.GroupId, rep.EndpointStats)
-		return nil
-
-	case "session":
-		if len(args) < 2 {
-			return fmt.Errorf("groupId とセッションの ID を指定してください")
-		}
-		body, err := c.GetQuery("/api/analysis/"+args[0]+"/sessions/"+args[1], nil)
-		if err != nil {
-			return err
-		}
-		if *asJSON {
-			fmt.Println(string(body))
-			return nil
-		}
-		resp := &analysis.SessionDetail{}
-		if err := json.Unmarshal(body, resp); err != nil {
-			return err
-		}
-		analysis.RenderSessionMarkdown(os.Stdout, resp)
-		return nil
-
-	case "analyze-diff":
-		if len(args) < 2 {
-			return fmt.Errorf("比較する2つの groupId を指定してください")
-		}
-		before, err := fetchAnalysis(c, args[0])
-		if err != nil {
-			return err
-		}
-		after, err := fetchAnalysis(c, args[1])
-		if err != nil {
-			return err
-		}
-		d := analysis.Compare(before, after, *topN)
-		if *asJSON {
-			// analyze / analyze-trend の --json と揃えて詰めて出す（AI が読む前提）
-			buf, err := json.Marshal(d)
-			if err != nil {
-				return err
-			}
-			fmt.Println(string(buf))
-			return nil
-		}
-		analysis.RenderDiffMarkdown(os.Stdout, d)
-		return nil
-
-	default:
-		fmt.Print(usage)
-		return fmt.Errorf("unknown command: %s", cmd)
-	}
+// options は全コマンドに共通のフラグ。
+type options struct {
+	url     string
+	json    bool
+	timeout time.Duration
 }
 
-func printGroup(c *summary.Client, id string, topN int, asJSON bool) error {
-	g, err := summary.Load(c, id, topN)
-	if err != nil {
-		return err
-	}
-	if asJSON {
-		return printJSON(g)
-	}
-	fmt.Print(g.Markdown())
-	return nil
+func (o *options) client() *client.Client {
+	c := client.New(o.url)
+	c.HTTP.Timeout = o.timeout
+	return c
 }
 
-// printAnalysis は /api/analysis/:id を読む。集計はサーバー側で行う（生ログを手元に持ってこない）。
-func printAnalysis(c *summary.Client, id string, asJSON bool) error {
-	body, err := c.Content("analysis", id)
-	if err != nil {
-		return err
+func newRootCmd() *cobra.Command {
+	o := &options{}
+	root := &cobra.Command{
+		Use:   "pprotein-cli",
+		Short: "pprotein の計測結果をテキストで取り出す",
+		Long: `pprotein の計測結果を、エージェントの文脈にそのまま貼れる Markdown（--json なら JSON）で出す。
+
+系統は2つある。
+  summary  サーバーの中で何が遅いか（alp / slp / pprof / resource の集計）
+  analyze  得点がいつどこで生まれ、利用者がどこまで進んだか（httplog の生ログと dbquery）
+
+GROUP は収集の GroupId（2026-10-17_10-41-02.984213 の形）。省略すると latest で、
+収集中・失敗したものも含めた最新の収集を指す。`,
+		SilenceUsage:      true,
+		SilenceErrors:     true,
+		DisableAutoGenTag: true,
 	}
-	if asJSON {
-		fmt.Println(body)
-		return nil
-	}
-	rep := &analysis.Report{}
-	if err := json.Unmarshal([]byte(body), rep); err != nil {
-		return fmt.Errorf("failed to parse analysis: %w", err)
-	}
-	analysis.RenderMarkdown(os.Stdout, rep)
-	return nil
+	root.CompletionOptions.HiddenDefaultCmd = true
+	root.SetFlagErrorFunc(withUsage)
+
+	f := root.PersistentFlags()
+	f.StringVar(&o.url, "url", envOr("PPROTEIN_URL", "http://localhost:9000"), "pprotein の URL。環境変数 PPROTEIN_URL でも指定できる")
+	f.BoolVar(&o.json, "json", false, "JSON で出力する")
+	f.DurationVar(&o.timeout, "timeout", 5*time.Minute, "API の応答と、収集の完了待ちの上限")
+
+	summary := newSummaryCmd(o)
+	summary.AddCommand(newSummaryDiffCmd(o))
+	analyze := newAnalyzeCmd(o)
+	analyze.AddCommand(
+		newAnalyzeDiffCmd(o), newAnalyzeTrendCmd(o), newEndpointsCmd(o),
+		newSessionsCmd(o), newSessionCmd(o), newTransitionsCmd(o),
+	)
+	root.AddCommand(newCollectCmd(o), newGroupsCmd(o), summary, analyze)
+
+	// 古い名前。使えるが help には出さない
+	root.AddCommand(
+		deprecated(newSummaryCmd(o), "latest", "summary"),
+		deprecated(newSummaryDiffCmd(o), "diff", "summary diff"),
+		deprecated(newAnalyzeDiffCmd(o), "analyze-diff", "analyze diff"),
+		deprecated(newAnalyzeTrendCmd(o), "analyze-trend", "analyze trend"),
+		deprecated(newEndpointsCmd(o), "endpoints", "analyze endpoints"),
+		deprecated(newSessionsCmd(o), "sessions", "analyze sessions"),
+		deprecated(newSessionCmd(o), "session", "analyze session"),
+		deprecated(newTransitionsCmd(o), "transitions", "analyze transitions"),
+	)
+	return root
 }
 
-func fetchAnalysis(c *summary.Client, id string) (*analysis.Report, error) {
-	body, err := c.Content("analysis", id)
-	if err != nil {
-		return nil, err
+// deprecated は cmd を古い名前 name でも使えるようにする。help には出さず、使うと新しい名前を案内する。
+// （cobra の Deprecated は、SetOut した出力先に英語の案内を混ぜる）
+func deprecated(cmd *cobra.Command, name, use string) *cobra.Command {
+	cmd.Use = name + strings.TrimPrefix(cmd.Use, cmd.Name())
+	cmd.Hidden = true
+	run := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s は古い名前です。`pprotein-cli %s` を使ってください\n", name, use)
+		return run(cmd, args)
 	}
-	rep := &analysis.Report{}
-	if err := json.Unmarshal([]byte(body), rep); err != nil {
-		return nil, fmt.Errorf("failed to parse analysis of %s: %w", id, err)
-	}
-	return rep, nil
+	return cmd
 }
 
-func printGroups(c *summary.Client, asJSON bool) error {
-	entries, err := c.AllEntries()
-	if err != nil {
-		return err
-	}
+// withUsage はフラグや引数の誤りに、使い方の案内を足す。
+func withUsage(cmd *cobra.Command, err error) error {
+	return fmt.Errorf("%w（使い方は %s --help）", err, cmd.CommandPath())
+}
 
-	type row struct {
-		GroupId string
-		Score   string
-		Commit  string
-		Types   int
-	}
-	rows := []row{}
-	for _, id := range summary.GroupIDs(entries) {
-		r := row{GroupId: id}
-		for _, e := range entries {
-			if e.Snapshot.GroupId != id {
+// groupArgs は先頭の n 個の引数が GroupId か latest かを確かめる。
+// summary / analyze はサブコマンドも持つので、打ち間違えたサブコマンドを GroupId として受け取らないようにする。
+func groupArgs(n int, count cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := count(cmd, args); err != nil {
+			return withUsage(cmd, err)
+		}
+		for _, arg := range args[:min(n, len(args))] {
+			if arg == "latest" {
 				continue
 			}
-			r.Types++
-			if e.Snapshot.Type == "score" {
-				r.Score = e.Message
+			if _, err := time.Parse(dbquery.GroupIdLayout, arg); err == nil {
+				continue
 			}
-			if r.Commit == "" && e.Snapshot.Repository != nil && e.Snapshot.Repository.Hash != "" {
-				h := e.Snapshot.Repository.Hash
-				if len(h) > 7 {
-					h = h[:7]
-				}
-				r.Commit = h
+			msg := fmt.Sprintf("%q は GroupId ではありません（%s の形か latest）", arg, dbquery.GroupIdLayout)
+			if s := cmd.SuggestionsFor(arg); len(s) > 0 {
+				msg += "。サブコマンドなら " + strings.Join(s, ", ")
 			}
+			return errors.New(msg)
 		}
-		rows = append(rows, r)
-	}
-
-	if asJSON {
-		return printJSON(rows)
-	}
-	fmt.Printf("%-32s %-9s %-40s %s\n", "GROUP", "COMMIT", "SCORE", "ENTRIES")
-	for _, r := range rows {
-		fmt.Printf("%-32s %-9s %-40s %d\n", r.GroupId, r.Commit, r.Score, r.Types)
-	}
-	return nil
-}
-
-// collect は収集を開始し、新しい GroupId が現れて全エントリが確定するまで待つ。
-// 「Duration 秒待ってからステータスを確認する」を手でやらずに済ませる。
-func collect(c *summary.Client, topN int, asJSON, wait bool, timeout time.Duration) error {
-	before, err := c.AllEntries()
-	if err != nil {
-		return err
-	}
-	known := map[string]bool{}
-	for _, id := range summary.GroupIDs(before) {
-		known[id] = true
-	}
-
-	if err := c.StartCollect(); err != nil {
-		return fmt.Errorf("収集の開始に失敗しました: %w", err)
-	}
-	fmt.Fprintln(os.Stderr, "収集を開始しました")
-	if !wait {
 		return nil
 	}
+}
 
+// groupArg は省略できる GROUP 引数を返す。
+func groupArg(args []string) string {
+	if len(args) == 0 {
+		return "latest"
+	}
+	return args[0]
+}
+
+// resolve は latest を実際の GroupId にする。
+func resolve(c *client.Client, id string) (string, error) {
+	if id != "latest" {
+		return id, nil
+	}
+	entries, err := c.AllEntries()
+	if err != nil {
+		return "", err
+	}
+	latest, err := client.Latest(entries)
+	if err != nil {
+		return "", fmt.Errorf("%w（まず pprotein-cli collect を実行してください）", err)
+	}
+	return latest, nil
+}
+
+// pollInterval は収集の完了を確かめる間隔。
+var pollInterval = 3 * time.Second
+
+// waitGroup は find が返す収集の types のエントリから pending が無くなるまで待ち、その GroupId を返す。
+// types が空なら全部のタイプを待つ。find が空を返すあいだ（収集がまだ現れていない）も待つ。
+func waitGroup(cmd *cobra.Command, c *client.Client, timeout time.Duration, find func([]client.Entry) string, types ...string) (string, error) {
+	stderr := cmd.ErrOrStderr()
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		time.Sleep(3 * time.Second)
-
+	failures := 0
+	for {
 		entries, err := c.AllEntries()
 		if err != nil {
-			continue
-		}
-		newID := ""
-		for _, id := range summary.GroupIDs(entries) {
-			if !known[id] {
-				newID = id
-				break
+			// 一時的に読めないことはあるが、続くならサーバーが落ちている。待ち続けても意味がない
+			if failures++; failures >= 3 || time.Now().After(deadline) {
+				return "", fmt.Errorf("収集の状態を読めません: %w", err)
+			}
+		} else {
+			failures = 0
+			if id := find(entries); id != "" {
+				pending := 0
+				for _, e := range entries {
+					if e.Snapshot.GroupId == id && e.Status == "pending" && (len(types) == 0 || slices.Contains(types, e.Snapshot.Type)) {
+						pending++
+					}
+				}
+				if pending == 0 {
+					fmt.Fprintf(stderr, "\r収集が確定しました: %s\n\n", id)
+					return id, nil
+				}
+				fmt.Fprintf(stderr, "\r収集中 (%s): 残り %d 件 ", id, pending)
+			}
+			if time.Now().After(deadline) {
+				return "", fmt.Errorf("収集が %s 以内に確定しませんでした", timeout)
 			}
 		}
-		if newID == "" {
-			continue
-		}
-
-		pending := 0
-		for _, e := range entries {
-			if e.Snapshot.GroupId == newID && e.Status == "pending" {
-				pending++
-			}
-		}
-		if pending > 0 {
-			fmt.Fprintf(os.Stderr, "\r収集中 (%s): 残り %d 件 ", newID, pending)
-			continue
-		}
-
-		fmt.Fprintf(os.Stderr, "\r収集が完了しました: %s\n\n", newID)
-		return printGroup(c, newID, topN, asJSON)
-	}
-	return fmt.Errorf("収集が %s 以内に完了しませんでした", timeout)
-}
-
-// waitGroup は収集グループの httplog / dbquery に pending が無くなるまで待つ。
-// 走行直後の analyze が、収集中の httplog を飛ばした空の集計を出すのを避ける。
-func waitGroup(c *summary.Client, id string, timeout time.Duration) (string, error) {
-	if id == "latest" {
-		latest, err := analysis.LatestGroup(c)
-		if err != nil {
-			return "", err
-		}
-		id = latest
-	}
-
-	deadline := time.Now().Add(timeout)
-	for {
-		pending, err := analysis.Pending(c, id)
-		if err != nil {
-			return "", err
-		}
-		if pending == 0 {
-			fmt.Fprintf(os.Stderr, "\r収集が確定しました: %s\n\n", id)
-			return id, nil
-		}
-		if !time.Now().Before(deadline) {
-			return "", fmt.Errorf("収集 %s が %s 以内に確定しませんでした（残り %d 件）", id, timeout, pending)
-		}
-		fmt.Fprintf(os.Stderr, "\r収集中 (%s): 残り %d 件 ", id, pending)
-		time.Sleep(3 * time.Second)
+		time.Sleep(pollInterval)
 	}
 }
 
-func printJSON(v any) error {
-	buf, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
+// output は --json なら v を JSON で、そうでなければ markdown を書く。
+func (o *options) output(cmd *cobra.Command, v any, markdown func(w io.Writer)) error {
+	w := cmd.OutOrStdout()
+	if !o.json {
+		markdown(w)
+		return nil
 	}
-	fmt.Println(string(buf))
-	return nil
+	// インデントしない（AI が読むときのトークンが倍以上になる）。SQL の < > & も \u003c にしない
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	return enc.Encode(v)
 }
 
 func envOr(key, def string) string {
