@@ -13,7 +13,7 @@ func RenderMarkdown(w io.Writer, rep *Report) {
 	fmt.Fprintf(w, "# analyze %s\n\n", rep.GroupId)
 	fmt.Fprintf(w, "- 0s = 収集開始 %s / 区間幅 %ds\n", rep.Origin.Format("15:04:05"), rep.Bucket)
 	if rep.Score != nil {
-		fmt.Fprintf(w, "- スコア: %s\n", rep.Score)
+		fmt.Fprintf(w, "- スコア: %s\n", rep.Score.Line())
 	}
 	if c := rep.Commit; c != nil {
 		fmt.Fprintf(w, "- コミット: %s\n", c)

@@ -194,6 +194,20 @@ func TestAnalyzeResolvesLatestOnCLI(t *testing.T) {
 	}
 }
 
+// groups はスコアとベンチのエラー件数を出す
+func TestGroupsShowScoreErrors(t *testing.T) {
+	f := newFake()
+	f.entries = append(f.entries, entry("score", older, "ok"))
+	f.bodies["/api/score/"+older+"-score"] = `{"Score":100,"Passed":true,"ErrorCount":2}`
+	out, _, err := run(t, f, "groups")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "| "+older+" |  | 100 | 2 | 3 |") || !strings.Contains(out, "| "+newer+" |  | - | - | 1 |") {
+		t.Errorf("stdout:\n%s", out)
+	}
+}
+
 func TestFlagsBelongToTheirCommand(t *testing.T) {
 	_, _, err := run(t, newFake(), "summary", "--lifecycle", "viewer")
 	if err == nil || !strings.Contains(err.Error(), "unknown flag: --lifecycle") {

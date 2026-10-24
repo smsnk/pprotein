@@ -66,10 +66,10 @@ func TestSummarizeAndRenderRuns(t *testing.T) {
 	RenderRunsMarkdown(&buf, &RunsResponse{Runs: []RunSummary{s}})
 	out := buf.String()
 	// 役割の付いた系列だけを score → penalty の順に出す
-	if !strings.Contains(out, "| GroupId | commit | score | tip [score] | ng_word [penalty] | req | 5xx | 499 | p99 | viewer 開始→最後 |") {
+	if !strings.Contains(out, "| GroupId | commit | score | errors | tip [score] | ng_word [penalty] | req | 5xx | 499 | p99 | viewer 開始→最後 |") {
 		t.Errorf("header:\n%s", out)
 	}
-	if !strings.Contains(out, "| 2026-10-11_17-02-15.633789 | 6f32b72 | 3385 | 3385 | 17 | 100 | 1 | 2 | 3.109s | 20→17 |") {
+	if !strings.Contains(out, "| 2026-10-11_17-02-15.633789 | 6f32b72 | 3385 | 0 | 3385 | 17 | 100 | 1 | 2 | 3.109s | 20→17 |") {
 		t.Errorf("row:\n%s", out)
 	}
 }

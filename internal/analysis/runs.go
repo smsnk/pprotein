@@ -335,7 +335,7 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 		lifecycles = append(lifecycles, l.Name)
 	}
 
-	head := []string{"GroupId", "commit", "score"}
+	head := []string{"GroupId", "commit", "score", "errors"}
 	for _, n := range series {
 		if r := roles[n]; r != "" {
 			n += " [" + r + "]"
@@ -350,12 +350,12 @@ func RenderRunsMarkdown(w io.Writer, resp *RunsResponse) {
 	md.Sep(w, len(head))
 
 	for _, r := range resp.Runs {
-		row := []string{r.GroupId, "", "-"}
+		row := []string{r.GroupId, "", "-", "-"}
 		if r.Commit != nil {
 			row[1] = r.Commit.ShortHash()
 		}
 		if r.Score != nil {
-			row[2] = r.Score.String()
+			row[2], row[3] = r.Score.String(), md.Int(r.Score.ErrorCount)
 		}
 		totals := map[string]float64{}
 		for _, st := range r.Series {

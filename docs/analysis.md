@@ -78,6 +78,7 @@ Markdown は人が端末で読むためのもの。エージェントやスク�
   `Endpoints[].Values` が並ぶ。系列の値が無い区間は `null`
 - 秒はミリ秒、割合は 0.01% の単位に丸めてある（比較のエンドポイント構成比 `ShareBefore` / `ShareAfter` は丸めていない）
 - `Commit` はアプリのコミット（httplog に記録されたもの）、`ConfigHash` は集計に使った設定のハッシュ
+- `Score` はベンチのスコア（`Value` / `Passed`）。ベンチの実行スクリプトが送っていれば、エラー件数 `ErrorCount`・走行の対象ホスト `Target`・走行時間 `DurationSec` も入る（[score.md](score.md)）
 
 走行の要約はサーバー側でキャッシュする（材料と設定が変わらなければ集計し直さない）。
 キャッシュは直近 30 走行ぶんまでで、古いものから捨てる（本番の大きな httplog で observer のメモリが尽きないように）。

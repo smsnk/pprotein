@@ -255,7 +255,7 @@ func TestLoadAndMarkdown(t *testing.T) {
 	md := g.Markdown()
 	for _, want := range []string{
 		"# summary 2025-11-23_10-41-02.984213",
-		"- スコア: 18902\n",
+		"- スコア: 18902（エラー 3 / 対象 isu1）\n",
 		`- コミット: a1b2c3d "notification のキャッシュ" (refs/heads/12-cache)`,
 		"## httplog: isu1（SUM の大きい順に 2 件）",
 		"| 1 | GET | /api/chair/rides/abc123 | 0.900s | 0.900s | 0.900s |",

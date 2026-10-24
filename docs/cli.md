@@ -72,7 +72,7 @@ Markdown は見出し・箇条書き・表だけで書く。見出しはコマ�
 # summary 2025-11-23_10-41-02.984213
 
 - 収集: 2025-11-23 10:41:02
-- スコア: 18902
+- スコア: 18902（エラー 3 / 対象 isu1 / 120s）
 - コミット: a1b2c3d "notification のキャッシュ" (refs/heads/12-cache-notification)
 
 ## httplog: isu1（SUM の大きい順に 10 件）
@@ -110,7 +110,7 @@ SUM はほとんど動かない。SUM の増減で並べると、いちばん効
 ```markdown
 # summary diff 2025-11-23_10-21-33.123456 -> 2025-11-23_10-41-02.984213
 
-- スコア: 12345 -> 18902 (+6557, +53.1%)
+- スコア: 12345 -> 18902 (+6557, +53.1%) / エラー 5 -> 3
 - コミット: 9f8e7d6 "rides のインデックス" (refs/heads/11-index-rides) -> a1b2c3d "notification のキャッシュ" (refs/heads/12-cache-notification)
 
 ## httplog（IMPACT の大きい順）
@@ -135,7 +135,7 @@ pprotein-cli collect --top 5
 `--json` は詰めた1行の JSON（インデントすると AI が読むときのトークンが倍以上になる）。
 
 - キーには単位が付く。`…Sec` は秒、`…Share` は 0〜1 の割合。pprof の `Flat` / `Cum` だけは単位を `Unit` に持つ（CPU プロファイルなら `seconds`）
-- 収集の素性は summary 系・analyze 系で同じ形: `GroupId`、`Score`（`Value` / `Passed`）、`Commit`（`Hash` / `Message` / `Ref`）、`Warnings`
+- 収集の素性は summary 系・analyze 系で同じ形: `GroupId`、`Score`（`Value` / `Passed`、ベンチが送っていれば `ErrorCount` / `Target` / `DurationSec`）、`Commit`（`Hash` / `Message` / `Ref`）、`Warnings`
 - `diff` はスコア・各行を `Before` / `After` で持つ（`summary diff` はコミットも）。片方にしか無い行はもう片方が無い（追加・削除）
 - analyze 系の中身は [analysis.md](analysis.md) の「AI に読ませる（JSON）」
 

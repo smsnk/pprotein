@@ -95,17 +95,17 @@ func newGroupsCmd(o *options) *cobra.Command {
 			rows := groupRows(c, entries, ids)
 			return o.output(cmd, rows, func(w io.Writer) {
 				fmt.Fprintf(w, "# groups（新しい順に %d 件 / 全 %d 件）\n\n", len(rows), total)
-				md.Row(w, []string{"GroupId", "commit", "score", "entries"})
-				md.Sep(w, 4)
+				md.Row(w, []string{"GroupId", "commit", "score", "errors", "entries"})
+				md.Sep(w, 5)
 				for _, r := range rows {
-					commit, scoreCell := "", "-"
+					commit, scoreCell, errors := "", "-", "-"
 					if r.Commit != nil {
 						commit = r.Commit.ShortHash()
 					}
 					if r.Score != nil {
-						scoreCell = r.Score.String()
+						scoreCell, errors = r.Score.String(), md.Int(r.Score.ErrorCount)
 					}
-					md.Row(w, []string{r.GroupId, commit, scoreCell, md.Int(r.Entries)})
+					md.Row(w, []string{r.GroupId, commit, scoreCell, errors, md.Int(r.Entries)})
 				}
 			})
 		},

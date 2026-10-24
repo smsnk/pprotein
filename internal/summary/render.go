@@ -21,7 +21,7 @@ func (g *Group) Markdown() string {
 		fmt.Fprintf(&b, "- 収集: %s\n", g.Datetime.Format("2006-01-02 15:04:05"))
 	}
 	if g.Score != nil {
-		fmt.Fprintf(&b, "- スコア: %s\n", g.Score)
+		fmt.Fprintf(&b, "- スコア: %s\n", g.Score.Line())
 	}
 	if g.Commit != nil {
 		fmt.Fprintf(&b, "- コミット: %s\n", g.Commit)
