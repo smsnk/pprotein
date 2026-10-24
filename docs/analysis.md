@@ -10,8 +10,8 @@ ISUCON では alp の上位がスコアに1点も寄与しないことが普通�
 | `dbquery` | 走行直後にアプリの DB へ SQL を流し、結果を収集グループに紐づけて保存する。次の initialize で消える行を残すため |
 | `analysis` | 1つの収集グループについて、httplog の生ログと dbquery の結果を時刻で揃えて集計する |
 | `pprotein-cli analyze` | analysis を Markdown で出す（エージェント向け） |
-| `pprotein-cli analyze-diff` | 2つの走行の analysis を比べる（施策の前後で何が変わったか） |
-| `pprotein-cli analyze-trend` | 直近の走行を1行ずつ並べる（施策を重ねた推移） |
+| `pprotein-cli analyze diff` | 2つの走行の analysis を比べる（施策の前後で何が変わったか） |
+| `pprotein-cli analyze trend` | 直近の走行を1行ずつ並べる（施策を重ねた推移） |
 
 回ごとの知識（どの SQL が得点か、利用者がどの順で進むか）は `dbquery.yml` と `analysis.yml` に置き、
 コードには持たない。エンドポイントのまとめ方は `alp.yml` の `matching_groups` をそのまま使う。
@@ -33,7 +33,7 @@ ISUCON では alp の上位がスコアに1点も寄与しないことが普通�
 | --- | --- | --- |
 | 走行の推移 | `#/analysis/` | 走行を横軸に、スコア・役割ごとの系列・ライフサイクルの開始数と最後の状態への到達数・リクエスト総数・エラー・応答時間。カーソルで全グラフの同じ走行に縦線が出る。下の一覧から詳細へ、2行を選ぶと比較へ。リクエスト件数はエンドポイント別の積み上げ棒（高さが総数、区分が件数、選ばなかったものは「その他」）で、カーソルを合わせた走行の内訳（件数・構成比）を表で出す。p99 とエラーは選んだエンドポイントの折れ線 |
 | 1走行 | `#/analysis/<GroupId>/` | 収集開始からの秒を横軸に、得点の累積と区間ごと・リクエスト・エラー・応答時間・上位のエンドポイント・役割ごとの系列・ライフサイクルの開始と完了。ライフサイクルは到達数の横棒（ファネル）、内訳は構成比の横棒付きの表。区間ごとのリクエスト件数はエンドポイント別の積み上げ棒（高さが総数）。下に全エンドポイントの表（件数・構成比・p50・p99・合計・エラー・499）があり、チェックしたものを積み上げで色分けし、p99・エラー・499 を折れ線にする |
-| 比較 | `#/analysis/diff/<A>/<B>/` | analyze-diff と同じ集計。増減は色で示す（penalty の系列・エラー・遅延は減るほど良い向き）。ライフサイクルは before / after の横棒を上下に並べる |
+| 比較 | `#/analysis/diff/<A>/<B>/` | analyze diff と同じ集計。増減は色で示す（penalty の系列・エラー・遅延は減るほど良い向き）。ライフサイクルは before / after の横棒を上下に並べる |
 | セッション一覧 | `#/analysis/<GroupId>/sessions/` | よくある遷移（「この要求の次に何を叩いたか」の件数と割合）と、セッションの表（開始・長さ・要求数・エラー・499・最大応答・訪れた host・ライフサイクルでどこまで進んだか）。ライフサイクルと最後に到達した状態で絞れる |
 | 1セッション | `#/analysis/<GroupId>/sessions/<ID>/` | 横軸に時刻、縦軸にエンドポイントを取った導線図（点は応答を返した時刻、横線は処理にかかった時間、色はステータス、ライフサイクルが進んだ要求は輪）と、要求の列 |
 
@@ -47,9 +47,9 @@ ISUCON では alp の上位がスコアに1点も寄与しないことが普通�
 
 | 読み込み口 | 内容 |
 | --- | --- |
-| `GET /api/analysis/<GroupId>/sessions[?lifecycle=<name>]` / `pprotein-cli sessions <GroupId>` | セッションの一覧 |
-| `GET /api/analysis/<GroupId>/sessions/<ID>` / `pprotein-cli session <GroupId> <ID>` | 1セッションの要求の列（まとめる前の URI・host・ステータス・応答時間・進んだ状態） |
-| `GET /api/analysis/<GroupId>/transitions[?lifecycle=<name>&top=N]` / `pprotein-cli transitions <GroupId>` | よくある遷移 |
+| `GET /api/analysis/<GroupId>/sessions[?lifecycle=<name>]` / `pprotein-cli analyze sessions <GroupId>` | セッションの一覧 |
+| `GET /api/analysis/<GroupId>/sessions/<ID>` / `pprotein-cli analyze session <GroupId> <ID>` | 1セッションの要求の列（まとめる前の URI・host・ステータス・応答時間・進んだ状態） |
+| `GET /api/analysis/<GroupId>/transitions[?lifecycle=<name>&top=N]` / `pprotein-cli analyze transitions <GroupId>` | よくある遷移 |
 
 - セッションは `httplog.entity_key`（cookie など）で束ねた利用者。対象は `source: httplog` のライフサイクルだけ
 - セッションの ID は開始時刻順の連番（`s001`, `s002`, …）。同じ材料なら同じ番号になる
@@ -63,11 +63,11 @@ Markdown は人が端末で読むためのもの。エージェントやスク�
 | 読み込み口 | 内容 | 大きさの目安（ISUCON13 の1走行） |
 | --- | --- | --- |
 | `GET /api/analysis/<GroupId>`（`latest` 可）/ `pprotein-cli analyze <GroupId> --json` | 1走行の全部 | 7.6KB |
-| `GET /api/analysis?limit=N` / `pprotein-cli analyze-trend --limit N --json` | 走行ごとの要約（古い順） | 1走行あたり約 2KB |
+| `GET /api/analysis?limit=N` / `pprotein-cli analyze trend --limit N --json` | 走行ごとの要約（古い順） | 1走行あたり約 2KB |
 | `GET /api/analysis?limit=N&endpoints=1` | 走行ごとの要約に、全エンドポイントの集計（`Endpoints`）を足したもの | 1走行あたり約 5KB |
 | `GET /api/analysis/<GroupId>/endpoints` | 全エンドポイントの区間ごとの件数・p50・p99・エラー・499 | 約 9KB |
-| `pprotein-cli endpoints <GroupId> [--json]` | 全エンドポイントの走行全体の集計（`Report.EndpointStats`） | |
-| `pprotein-cli analyze-diff <A> <B> --json` | 2走行の比較 | 6.9KB |
+| `pprotein-cli analyze endpoints <GroupId> [--json]` | 全エンドポイントの走行全体の集計（`Report.EndpointStats`） | |
+| `pprotein-cli analyze diff <A> <B> --json` | 2走行の比較 | 6.9KB |
 
 ドキュメントを読まなくても解釈できるようにしてある。
 
@@ -76,17 +76,17 @@ Markdown は人が端末で読むためのもの。エージェントやスク�
   `penalty`（得点を減らすもの）。`Query` は元の dbquery の name（ライフサイクルの開始・完了数は `lifecycle:<name>`）
 - **時系列は列ごとの配列。** `Timeline.OffsetSec` と同じ並びで、`Requests` / `P99Sec` / `Series[].Values` /
   `Endpoints[].Values` が並ぶ。系列の値が無い区間は `null`
-- 秒はミリ秒、割合は 0.01% の単位に丸めてある
+- 秒はミリ秒、割合は 0.01% の単位に丸めてある（比較のエンドポイント構成比 `ShareBefore` / `ShareAfter` は丸めていない）
 - `Commit` はアプリのコミット（httplog に記録されたもの）、`ConfigHash` は集計に使った設定のハッシュ
 
 走行の要約はサーバー側でキャッシュする（材料と設定が変わらなければ集計し直さない）。
 キャッシュは直近 30 走行ぶんまでで、古いものから捨てる（本番の大きな httplog で observer のメモリが尽きないように）。
 収集中のエントリがある走行はキャッシュせず、`Warnings` に理由が入る。
 
-## 走行を比べる（analyze-diff）
+## 走行を比べる（analyze diff）
 
 ```sh
-pprotein-cli analyze-diff <before の GroupId> <after の GroupId> [--top N] [--json]
+pprotein-cli analyze diff <before の GroupId> [<after の GroupId>] [--top N] [--json]   # after を省くと latest
 ```
 
 系列・ライフサイクル・内訳は**名前で突き合わせる**だけで、何の系列かは知らない（中身は回ごとの設定で決まる）。
@@ -108,7 +108,7 @@ pprotein-cli analyze-diff <before の GroupId> <after の GroupId> [--top N] [--
 
 ## 系列の選び方
 
-`analyze-diff` が比べる系列は、競技開始直後に `analysis.yml` で決める。マニュアルから次の順に拾い、
+`analyze diff` が比べる系列は、競技開始直後に `analysis.yml` で決める。マニュアルから次の順に拾い、
 `role` に書く（出力に載るだけで集計は変わらない）。
 
 1. **得点の項（必須、`role: score`）**: スコア計算式の項ごとに1系列。項が複数なら `series` 列で分ける。合計がベンチのスコアと合うかで確かめる
@@ -197,5 +197,6 @@ lifecycles:
 - **走行直後は httplog がまだ収集中（pending）のことが多い。** httplog の収集は Duration 秒（例: 110 秒）経つまで終わらない。
   収集中・失敗したエントリは集計に含めず、「httplog isu1 は収集中（pending）」のように警告に出す。
   警告が出ていたら、ライフサイクルの 0 件やリクエスト数の 0 は実際の値ではない。完了を待ってから読み直す。
-  `pprotein-cli analyze --wait [groupId]` は、その収集の httplog / dbquery に pending が無くなるまで待ってから出す（上限は `--timeout`）
-- `latest` は収集中の httplog も含めて最新の収集を指す（走行直後に1つ前の走行と取り違えないため）
+  `pprotein-cli analyze --wait [groupId]` は、その収集の httplog / dbquery / score に pending が無くなるまで待ってから出す（上限は `--timeout`）
+- `latest` は収集中のものも含めて最新の収集を指す（走行直後に1つ前の走行と取り違えないため）。
+  API（`/api/analysis/latest`）は httplog のある収集から、CLI はどの収集タイプでも（全部が失敗した収集は除いて）選ぶ
