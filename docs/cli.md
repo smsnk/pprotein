@@ -136,7 +136,7 @@ pprotein-cli collect --top 5
 
 - キーには単位が付く。`…Sec` は秒、`…Share` は 0〜1 の割合。pprof の `Flat` / `Cum` だけは単位を `Unit` に持つ（CPU プロファイルなら `seconds`）
 - 収集の素性は summary 系・analyze 系で同じ形: `GroupId`、`Score`（`Value` / `Passed`、ベンチが送っていれば `ErrorCount` / `Target` / `DurationSec`）、`Commit`（`Hash` / `Message` / `Ref`）、`Warnings`
-- `diff` はスコア・各行を `Before` / `After` で持つ（`summary diff` はコミットも）。片方にしか無い行はもう片方が無い（追加・削除）
+- `diff` はスコア・コミット・各行を `Before` / `After` で持つ。片方にしか無い行はもう片方が無い（追加・削除）
 - analyze 系の中身は [analysis.md](analysis.md) の「AI に読ませる（JSON）」
 
 ## メモ

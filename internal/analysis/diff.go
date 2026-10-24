@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/smsnk/pprotein/internal/git"
 	"github.com/smsnk/pprotein/internal/md"
 	"github.com/smsnk/pprotein/internal/score"
 )
@@ -25,6 +26,7 @@ type (
 		Before string
 		After  string
 		Score  *score.Diff `json:",omitempty"`
+		Commit *git.Diff   `json:",omitempty"`
 		// Warnings は比較の前提が崩れているもの（設定の食い違い、片方の警告など）。
 		Warnings []string `json:",omitempty"`
 
@@ -102,6 +104,9 @@ func Compare(before, after *Report, top int) *Diff {
 	d := &Diff{Before: before.GroupId, After: after.GroupId}
 	if before.Score != nil || after.Score != nil {
 		d.Score = &score.Diff{Before: before.Score, After: after.Score}
+	}
+	if before.Commit != nil || after.Commit != nil {
+		d.Commit = &git.Diff{Before: before.Commit, After: after.Commit}
 	}
 
 	if a, b := before.ConfigHash.Analysis, after.ConfigHash.Analysis; a != b {
@@ -375,6 +380,9 @@ func RenderDiffMarkdown(w io.Writer, d *Diff) {
 	fmt.Fprintf(w, "# analyze diff %s -> %s\n\n", d.Before, d.After)
 	if d.Score != nil {
 		fmt.Fprintf(w, "- スコア: %s\n", d.Score)
+	}
+	if d.Commit != nil {
+		fmt.Fprintf(w, "- コミット: %s\n", d.Commit)
 	}
 	fmt.Fprintln(w, "- 2走行の比較なので有意差は判定しない。走行間のばらつきの実測値と比べて読む")
 	md.Warnings(w, d.Warnings)

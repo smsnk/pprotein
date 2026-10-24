@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/smsnk/pprotein/internal/dbquery"
+	"github.com/smsnk/pprotein/internal/git"
 	"github.com/smsnk/pprotein/internal/score"
 )
 
@@ -110,6 +111,22 @@ func TestCompareWarnsOnConfigMismatchAndSplitsSeries(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("markdown lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+// summary diff と同じく、比べた2回のコミットを出す
+func TestCompareShowsCommits(t *testing.T) {
+	b, a := report("A", "h1", 1), report("B", "h1", 2)
+	b.Commit = &git.Commit{Hash: "aaaaaaaaaa", Message: "before"}
+	a.Commit = &git.Commit{Hash: "bbbbbbbbbb", Message: "after", Ref: "refs/heads/x"}
+	d := Compare(b, a, 10)
+	var buf bytes.Buffer
+	RenderDiffMarkdown(&buf, d)
+	if !strings.Contains(buf.String(), `- コミット: aaaaaaa "before" -> bbbbbbb "after" (refs/heads/x)`) {
+		t.Errorf("markdown:\n%s", buf.String())
+	}
+	if d.Commit == nil || d.Commit.Before.Hash != "aaaaaaaaaa" {
+		t.Errorf("Commit = %+v", d.Commit)
 	}
 }
 

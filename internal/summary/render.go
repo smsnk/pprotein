@@ -75,17 +75,11 @@ type Diff struct {
 	// Before / After は比べた収集の GroupId。
 	Before, After string
 	Score         *score.Diff `json:",omitempty"`
-	Commit        *CommitDiff `json:",omitempty"`
+	Commit        *git.Diff   `json:",omitempty"`
 	// Warnings は比較の前提が崩れているもの（片方の収集中・失敗のエントリなど）。
 	Warnings  []string `json:",omitempty"`
 	Endpoints []EndpointDiff
 	Queries   []QueryDiff
-}
-
-// CommitDiff は before / after のコミット。分からなければ nil。
-type CommitDiff struct {
-	Before *git.Commit `json:",omitempty"`
-	After  *git.Commit `json:",omitempty"`
 }
 
 // RowDiff は before / after の同じ行（同じ label・同じキー）の組。
@@ -193,7 +187,7 @@ func Compare(before, after *Group, topN int) *Diff {
 		d.Score = &score.Diff{Before: before.Score, After: after.Score}
 	}
 	if before.Commit != nil || after.Commit != nil {
-		d.Commit = &CommitDiff{Before: before.Commit, After: after.Commit}
+		d.Commit = &git.Diff{Before: before.Commit, After: after.Commit}
 	}
 	for _, w := range before.Warnings {
 		d.Warnings = append(d.Warnings, "before: "+w)
@@ -228,8 +222,8 @@ func (d *Diff) Markdown() string {
 	if d.Score != nil {
 		fmt.Fprintf(&b, "- スコア: %s\n", d.Score)
 	}
-	if c := d.Commit; c != nil {
-		fmt.Fprintf(&b, "- コミット: %s -> %s\n", c.Before, c.After)
+	if d.Commit != nil {
+		fmt.Fprintf(&b, "- コミット: %s\n", d.Commit)
 	}
 	md.Warnings(&b, d.Warnings)
 	b.WriteString("\n")

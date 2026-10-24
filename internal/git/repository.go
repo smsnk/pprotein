@@ -40,6 +40,16 @@ func (c *Commit) ShortHash() string {
 	return c.Hash
 }
 
+// Diff は比べた2回のコミット。分からなければ nil。
+type Diff struct {
+	Before *Commit `json:",omitempty"`
+	After  *Commit `json:",omitempty"`
+}
+
+func (d *Diff) String() string {
+	return d.Before.String() + " -> " + d.After.String()
+}
+
 // String は「a1b2c3d "メッセージ" (refs/heads/x)」。
 func (c *Commit) String() string {
 	if c == nil {
