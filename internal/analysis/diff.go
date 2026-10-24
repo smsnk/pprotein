@@ -97,11 +97,8 @@ type (
 	}
 )
 
-// Compare は before → after の差を出す。top はエンドポイント・内訳の行数の上限。
+// Compare は before → after の差を出す。top はエンドポイント構成比の行数の上限（0 なら全部）。
 func Compare(before, after *Report, top int) *Diff {
-	if top <= 0 {
-		top = defaultTop
-	}
 	d := &Diff{Before: before.GroupId, After: after.GroupId}
 	if before.Score != nil || after.Score != nil {
 		d.Score = &score.Diff{Before: before.Score, After: after.Score}
@@ -213,7 +210,7 @@ func compareEndpoints(before, after map[string]int, top int) []EndpointDiff {
 		}
 		return out[i].Key < out[j].Key
 	})
-	if len(out) > top {
+	if top > 0 && len(out) > top {
 		out = out[:top]
 	}
 	return out

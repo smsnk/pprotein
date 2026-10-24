@@ -118,8 +118,4 @@ func TestLatestGroupIncludesPending(t *testing.T) {
 	if err != nil || id != group {
 		t.Errorf("latest = %q, %v", id, err)
 	}
-	n, err := Pending(api, group)
-	if err != nil || n != 1 {
-		t.Errorf("pending = %d, %v", n, err)
-	}
 }

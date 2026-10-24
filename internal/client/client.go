@@ -3,6 +3,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/goccy/go-json"
 	"github.com/smsnk/pprotein/internal/git"
+	"github.com/smsnk/pprotein/internal/md"
 	"github.com/smsnk/pprotein/internal/score"
 )
 
@@ -52,7 +54,7 @@ func (c *Client) get(path string) ([]byte, error) {
 func (c *Client) GetQuery(path string, query url.Values) ([]byte, error) {
 	u, err := url.JoinPath(c.BaseURL, path)
 	if err != nil {
-		return nil, fmt.Errorf("invalid url: %w", err)
+		return nil, fmt.Errorf("URL が正しくありません: %w", err)
 	}
 	if len(query) > 0 {
 		u += "?" + query.Encode()
@@ -60,18 +62,27 @@ func (c *Client) GetQuery(path string, query url.Values) ([]byte, error) {
 
 	resp, err := c.HTTP.Get(u)
 	if err != nil {
-		return nil, fmt.Errorf("failed to request %s: %w", u, err)
+		return nil, fmt.Errorf("%s を読めません: %w", u, err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read %s: %w", u, err)
+		return nil, fmt.Errorf("%s の応答を読めません: %w", u, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http error: %s: status=%d body=%s", u, resp.StatusCode, truncate(string(body), 200))
+		return nil, fmt.Errorf("%s が %d を返しました: %s", u, resp.StatusCode, errorMessage(body))
 	}
 	return body, nil
+}
+
+// errorMessage はエラー応答の本文から、人が読むメッセージを取り出す。echo のエラーは {"message": ...} の JSON。
+func errorMessage(body []byte) string {
+	var e struct{ Message string }
+	if json.Unmarshal(body, &e) == nil && e.Message != "" {
+		return e.Message
+	}
+	return md.Clip(strings.TrimSpace(string(body)), 200)
 }
 
 // Entries は指定した収集タイプのエントリ一覧を返す。
@@ -82,7 +93,7 @@ func (c *Client) Entries(typ string) ([]Entry, error) {
 	}
 	entries := []Entry{}
 	if err := json.Unmarshal(body, &entries); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal %s entries: %w", typ, err)
+		return nil, fmt.Errorf("%s の一覧を読めません: %w", typ, err)
 	}
 	return entries, nil
 }
@@ -111,7 +122,7 @@ func (c *Client) Score(id string) (*score.Value, error) {
 	}
 	v := &score.Value{}
 	if err := json.Unmarshal(body, v); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal score: %w", err)
+		return nil, fmt.Errorf("スコアを読めません: %w", err)
 	}
 	return v, nil
 }
@@ -122,8 +133,8 @@ func (c *Client) StartCollect() error {
 	return err
 }
 
-// Types は summary が読む収集タイプ。表示する順に並べてある。
-var Types = []string{"score", "httplog", "slowlog", "resource", "pprof", "memo"}
+// Types は pprotein の収集タイプ。
+var Types = []string{"score", "httplog", "slowlog", "ptqd", "resource", "pprof", "memo", "dbquery"}
 
 // AllEntries は全タイプのエントリをまとめて取る。
 // 収集タイプが存在しない（古い pprotein）場合はそのタイプを黙って飛ばす。
@@ -133,6 +144,10 @@ func (c *Client) AllEntries() ([]Entry, error) {
 	for _, typ := range Types {
 		entries, err := c.Entries(typ)
 		if err != nil {
+			// 繋がらない・応答が無いなら残りのタイプも同じ。タイムアウトをタイプの数だけ待たない
+			if errors.As(err, new(*url.Error)) {
+				return nil, err
+			}
 			if firstErr == nil {
 				firstErr = err
 			}
@@ -144,6 +159,37 @@ func (c *Client) AllEntries() ([]Entry, error) {
 		return nil, firstErr
 	}
 	return all, nil
+}
+
+// Latest は最新の収集の GroupId を返す。収集中のものは含め、全部が失敗した収集は除く。
+// 走行直後に1つ前の走行を指すと、取り違えに気づけない。
+func Latest(entries []Entry) (string, error) {
+	live := []Entry{}
+	for _, e := range entries {
+		if e.Status != "fail" {
+			live = append(live, e)
+		}
+	}
+	ids := GroupIDs(live)
+	if len(ids) == 0 {
+		return "", fmt.Errorf("収集がありません（まず pprotein-cli collect を実行してください）")
+	}
+	return ids[0], nil
+}
+
+// Newest は収集 groupId の typ のエントリのうち、確定した（ok の）いちばん新しいものを返す。無ければ nil。
+// ベンチを回し直してスコアや dbquery を送り直すと、同じ収集に複数できる。
+func Newest(entries []Entry, typ, groupId string) *Entry {
+	var newest *Entry
+	for i, e := range entries {
+		if e.Snapshot.Type != typ || e.Snapshot.GroupId != groupId || e.Status != "ok" {
+			continue
+		}
+		if newest == nil || e.Snapshot.Datetime.After(newest.Snapshot.Datetime) {
+			newest = &entries[i]
+		}
+	}
+	return newest
 }
 
 // Warning は確定していない（収集中・失敗の）エントリを警告文にする。確定していれば空。
@@ -180,11 +226,4 @@ func GroupIDs(entries []Entry) []string {
 	// GroupId は "YYYY-mm-dd_HH-MM-SS.ffffff" なので文字列比較で時系列に並ぶ
 	sort.Sort(sort.Reverse(sort.StringSlice(ids)))
 	return ids
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return strings.ToValidUTF8(s[:n], "") + "..."
 }

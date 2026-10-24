@@ -101,17 +101,11 @@ func LatestGroup(api *client.Client) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	live := []client.Entry{}
-	for _, e := range entries {
-		if e.Status != "fail" {
-			live = append(live, e)
-		}
-	}
-	ids := client.GroupIDs(live)
-	if len(ids) == 0 {
+	id, err := client.Latest(entries)
+	if err != nil {
 		return "", fmt.Errorf("no httplog is collected")
 	}
-	return ids[0], nil
+	return id, nil
 }
 
 // Load は収集グループの httplog（生ログ）と dbquery の結果を集める。
@@ -163,16 +157,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 
 	// dbquery は無くてもよい（古い収集や、SQL を使わない回）。
 	if dbq, err := api.Entries("dbquery"); err == nil {
-		var latest *client.Entry
-		for i := range dbq {
-			e := &dbq[i]
-			if e.Snapshot.GroupId != groupId || e.Status != "ok" {
-				continue
-			}
-			if latest == nil || e.Snapshot.Datetime.After(latest.Snapshot.Datetime) {
-				latest = e
-			}
-		}
+		latest := client.Newest(dbq, "dbquery", groupId)
 		// dbquery は手で再実行できるので、成功したものがあれば失敗の跡は無視する。
 		in.Warnings = append(in.Warnings, incomplete(dbq, groupId, "", latest != nil)...)
 		if latest != nil {
@@ -194,17 +179,7 @@ func Load(api *client.Client, cfg *Config, groupId string) (*Input, error) {
 
 	// スコアは無くてもよい（ベンチの結果を送っていない走行）。複数あれば新しいものを使う。
 	if scores, err := api.Entries("score"); err == nil {
-		var latest *client.Entry
-		for i := range scores {
-			e := &scores[i]
-			if e.Snapshot.GroupId != groupId || e.Status != "ok" {
-				continue
-			}
-			if latest == nil || e.Snapshot.Datetime.After(latest.Snapshot.Datetime) {
-				latest = e
-			}
-		}
-		if latest != nil {
+		if latest := client.Newest(scores, "score", groupId); latest != nil {
 			if v, err := api.Score(latest.Snapshot.ID); err == nil {
 				in.Score = v.Brief()
 			}
@@ -233,25 +208,4 @@ func incomplete(entries []client.Entry, groupId, label string, ignoreFail bool) 
 		}
 	}
 	return warnings
-}
-
-// Pending は収集グループの httplog / dbquery のうち、まだ収集中のエントリの数を返す。
-func Pending(api *client.Client, groupId string) (int, error) {
-	n := 0
-	for _, typ := range []string{"httplog", "dbquery"} {
-		entries, err := api.Entries(typ)
-		if err != nil {
-			// dbquery は無くてもよい
-			if typ == "dbquery" {
-				continue
-			}
-			return 0, err
-		}
-		for _, e := range entries {
-			if e.Snapshot.GroupId == groupId && e.Status == "pending" {
-				n++
-			}
-		}
-	}
-	return n, nil
 }

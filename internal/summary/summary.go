@@ -46,20 +46,18 @@ type (
 	}
 )
 
-// Load は GroupId（空なら最新）の中身を集めて Group にする。
-// types を渡すと、その収集タイプだけを読む（diff に pprof のプロファイルは要らない）。
+// Types は Group に節がある収集タイプ。ptqd / dbquery は読まない（警告も出さない）。
+var Types = []string{"score", "httplog", "slowlog", "resource", "pprof", "memo"}
+
+// Load は GroupId の収集の中身を集めて Group にする。
+// types を渡すと、その収集タイプだけを読む（diff に pprof のプロファイルは要らない）。既定は Types。
 func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, error) {
+	if len(types) == 0 {
+		types = Types
+	}
 	entries, err := c.AllEntries()
 	if err != nil {
 		return nil, err
-	}
-
-	if groupID == "" {
-		ids := client.GroupIDs(entries)
-		if len(ids) == 0 {
-			return nil, fmt.Errorf("収集がありません（まず pprotein-cli collect を実行してください）")
-		}
-		groupID = ids[0]
 	}
 
 	g := &Group{GroupId: groupID}
@@ -77,6 +75,7 @@ func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, 
 		return mine[i].Snapshot.Label < mine[j].Snapshot.Label
 	})
 
+	newestScore := client.Newest(entries, "score", groupID)
 	for _, e := range mine {
 		s := e.Snapshot
 		if g.Datetime.IsZero() || s.Datetime.Before(g.Datetime) {
@@ -85,7 +84,7 @@ func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, 
 		if g.Commit == nil {
 			g.Commit = s.Repository.Commit()
 		}
-		if len(types) > 0 && !slices.Contains(types, s.Type) {
+		if !slices.Contains(types, s.Type) {
 			continue
 		}
 
@@ -98,6 +97,10 @@ func Load(c *client.Client, groupID string, topN int, types ...string) (*Group, 
 		var err error
 		switch s.Type {
 		case "score":
+			// スコアが複数あれば新しいものだけ読む（analyze と同じ）
+			if s.ID != newestScore.Snapshot.ID {
+				continue
+			}
 			var v *score.Value
 			if v, err = c.Score(s.ID); err == nil {
 				g.Score = v.Brief()

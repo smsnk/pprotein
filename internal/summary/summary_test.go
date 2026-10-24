@@ -237,14 +237,11 @@ func TestLoadAndMarkdown(t *testing.T) {
 		},
 	)
 
-	g, err := Load(client.New(s.URL), "", 2)
+	g, err := Load(client.New(s.URL), "2025-11-23_10-41-02.984213", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if g.GroupId != "2025-11-23_10-41-02.984213" {
-		t.Errorf("GroupId = %q（最新が選ばれていない）", g.GroupId)
-	}
 	if g.Score == nil || g.Score.Value != 18902 {
 		t.Errorf("Score = %+v", g.Score)
 	}
@@ -457,9 +454,6 @@ func TestTiesAreStable(t *testing.T) {
 
 func TestLoadMissingGroup(t *testing.T) {
 	s := mockServer(t, map[string]map[string]string{}, map[string]string{})
-	if _, err := Load(client.New(s.URL), "", 10); err == nil {
-		t.Error("収集が無いときはエラーにする")
-	}
 	if _, err := Load(client.New(s.URL), "nosuch", 10); err == nil {
 		t.Error("存在しない group はエラーにする")
 	}
@@ -473,7 +467,7 @@ func TestLoadReportsUnreadableEntries(t *testing.T) {
 		},
 		map[string]string{}, // score の中身が無い（404）
 	)
-	g, err := Load(client.New(s.URL), "", 10)
+	g, err := Load(client.New(s.URL), "2025-11-23_10-41-02.984213", 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,11 +486,35 @@ func TestLoadOnlyGivenTypes(t *testing.T) {
 		},
 		map[string]string{},
 	)
-	g, err := Load(client.New(s.URL), "", 10, "httplog")
+	g, err := Load(client.New(s.URL), "2025-11-23_10-41-02.984213", 10, "httplog")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(g.HTTPLog) != 1 || g.SlowLog != nil || g.Resource != nil {
 		t.Errorf("httplog だけ読むはず: %+v", g)
+	}
+}
+
+// 同じ収集にスコアが複数あれば、一覧の順によらず新しいものを使う
+func TestLoadUsesNewestScore(t *testing.T) {
+	const group = "2025-11-23_10-41-02.984213"
+	entry := func(id, at string) string {
+		return fmt.Sprintf(`{"Snapshot":{"Type":"score","ID":%q,"Datetime":%q,"GroupId":%q,"Label":"bench"},"Status":"ok"}`, id, at, group)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/score", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "[%s,%s]", entry("new", "2025-11-23T10:45:00Z"), entry("old", "2025-11-23T10:43:00Z"))
+	})
+	mux.HandleFunc("/api/score/old", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"Score":1}`) })
+	mux.HandleFunc("/api/score/new", func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, `{"Score":2,"Passed":true}`) })
+	s := httptest.NewServer(mux)
+	t.Cleanup(s.Close)
+
+	g, err := Load(client.New(s.URL), group, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Score == nil || g.Score.Value != 2 {
+		t.Errorf("Score = %+v", g.Score)
 	}
 }

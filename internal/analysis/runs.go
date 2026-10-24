@@ -132,11 +132,12 @@ func (c *memo[T]) put(key string, r T) {
 // entryIndex は収集タイプをまたいだエントリを GroupId ごとにまとめる。
 type entryIndex map[string][]client.Entry
 
-var cacheTypes = []string{"httplog", "dbquery", "score"}
+// Types は analyze が読む収集タイプ。
+var Types = []string{"httplog", "dbquery", "score"}
 
 func loadEntryIndex(api *client.Client) (entryIndex, error) {
 	idx := entryIndex{}
-	for _, typ := range cacheTypes {
+	for _, typ := range Types {
 		entries, err := api.Entries(typ)
 		if err != nil {
 			if typ == "httplog" {
@@ -233,7 +234,7 @@ func (h *Handler) getRuns(c echo.Context) error {
 }
 
 // getDiff は GET /api/analysis/diff?before=<GroupId>&after=<GroupId>[&top=N]。
-// pprotein-cli analyze-diff --json と同じものを返す（UI の比較画面が使う）。
+// pprotein-cli analyze diff --json と同じものを返す（UI の比較画面が使う）。
 func (h *Handler) getDiff(c echo.Context) error {
 	before, after := c.QueryParam("before"), c.QueryParam("after")
 	if before == "" || after == "" {

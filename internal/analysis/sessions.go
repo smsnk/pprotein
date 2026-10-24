@@ -390,7 +390,8 @@ func (h *Handler) getTransitions(c echo.Context) error {
 
 // --- Markdown（CLI） ---
 
-func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, top int) {
+// RenderSessionsMarkdown はセッションを limit 件まで表にする（0 なら全部）。
+func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, limit int) {
 	fmt.Fprintf(w, "# analyze sessions %s（%d / 全 %d セッション）\n\n", s.GroupId, len(s.Sessions), s.Total)
 	head := []string{"ID", "開始", "終了", "req", "エラー", "499", "最大応答", "host"}
 	for _, l := range s.Lifecycles {
@@ -399,8 +400,8 @@ func RenderSessionsMarkdown(w io.Writer, s *SessionsResponse, top int) {
 	md.Row(w, head)
 	md.Sep(w, len(head))
 	for i, x := range s.Sessions {
-		if top > 0 && i >= top {
-			fmt.Fprintf(w, "\n（残り %d 件は --top で増やす）\n", len(s.Sessions)-top)
+		if limit > 0 && i >= limit {
+			fmt.Fprintf(w, "\n（残り %d 件は --limit で増やす）\n", len(s.Sessions)-limit)
 			break
 		}
 		row := []string{x.ID, fmt.Sprintf("%.1fs", x.StartSec), fmt.Sprintf("%.1fs", x.EndSec),

@@ -143,10 +143,10 @@ func ParseQueries(tsv string) []Query {
 func ParseProfile(raw []byte) ([]Func, error) {
 	p, err := profile.Parse(bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse profile: %w", err)
+		return nil, fmt.Errorf("プロファイルを読めません: %w", err)
 	}
 	if len(p.SampleType) == 0 {
-		return nil, fmt.Errorf("profile has no sample type")
+		return nil, fmt.Errorf("プロファイルにサンプルの種類がありません")
 	}
 
 	// CPU プロファイルなら最後が nanoseconds。fgprof も同じ形。時間は秒に直す。
